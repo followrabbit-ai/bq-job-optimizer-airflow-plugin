@@ -54,7 +54,7 @@ The plugin uses a single Airflow variable for configuration. Create a JSON confi
 
 - `api_key` (required): Your Rabbit API key
 - `base_url` (required): The base URL for the Rabbit API
-- `default_pricing_mode` (required): The default pricing mode for jobs
+- `default_pricing_mode` (required): The default pricing mode for jobs. Must be one of: `"on_demand"` or `"slot_based"`
 - `reservation_ids` (required): List of reservation IDs in the format "project:region.reservation-name"
 
 ### Setting the Configuration

@@ -33,6 +33,13 @@ def patch_bigquery_hook():
                     logging.warning("Rabbit BQ Optimizer: Missing required configuration fields: %s. Proceeding with original job configuration.", ", ".join(missing_fields))
                     return original_insert_job(self, configuration=configuration, **kwargs)
 
+                # Validate default_pricing_mode
+                valid_pricing_modes = ["on_demand", "slot_based"]
+                if config["default_pricing_mode"] not in valid_pricing_modes:
+                    logging.warning("Rabbit BQ Optimizer: Invalid default_pricing_mode '%s'. Must be one of: %s. Proceeding with original job configuration.", 
+                                  config["default_pricing_mode"], ", ".join(valid_pricing_modes))
+                    return original_insert_job(self, configuration=configuration, **kwargs)
+
                 if not config["reservation_ids"]:
                     logging.warning("Rabbit BQ Optimizer: No reservation IDs configured. Proceeding with original job configuration.")
                     return original_insert_job(self, configuration=configuration, **kwargs)
