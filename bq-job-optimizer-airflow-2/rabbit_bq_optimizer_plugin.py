@@ -27,7 +27,7 @@ def patch_bigquery_hook():
                     return original_insert_job(self, configuration=configuration, **kwargs)
 
                 # Validate required fields
-                required_fields = ["api_key", "base_url", "reservation_ids", "default_pricing_mode"]
+                required_fields = ["api_key", "reservation_ids", "default_pricing_mode"]
                 missing_fields = [field for field in required_fields if field not in config]
                 if missing_fields:
                     logging.warning("Rabbit BQ Optimizer: Missing required configuration fields: %s. Proceeding with original job configuration.", ", ".join(missing_fields))

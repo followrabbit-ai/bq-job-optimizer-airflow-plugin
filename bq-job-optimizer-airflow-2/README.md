@@ -41,7 +41,6 @@ The plugin uses a single Airflow variable for configuration. Create a JSON confi
 ```json
 {
     "api_key": "your-rabbit-api-key",
-    "base_url": "https://api.rabbit.com/v1",
     "default_pricing_mode": "on_demand",
     "reservation_ids": [
         "project:region.reservation-name1",
@@ -53,7 +52,6 @@ The plugin uses a single Airflow variable for configuration. Create a JSON confi
 ### Configuration Fields
 
 - `api_key` (required): Your Rabbit API key
-- `base_url` (required): The base URL for the Rabbit API
 - `default_pricing_mode` (required): The default pricing mode for jobs. Must be one of: `"on_demand"` or `"slot_based"`
 - `reservation_ids` (required): List of reservation IDs in the format "project:region.reservation-name"
 
@@ -65,7 +63,6 @@ You can set the configuration in two ways:
 ```bash
 airflow variables set rabbit_bq_optimizer_config '{
     "api_key": "your-rabbit-api-key",
-    "base_url": "https://api.rabbit.com/v1",
     "default_pricing_mode": "on_demand",
     "reservation_ids": [
         "project:region.reservation-name1",
@@ -127,7 +124,6 @@ If you see this error, it means the Airflow variable `rabbit_bq_optimizer_config
    ```json
    {
        "api_key": "your-rabbit-api-key", 
-       "base_url": "https://api.rabbit.com/v1",
        "default_pricing_mode": "on_demand",
        "reservation_ids": [
            "project:us-central1.reservation-name1",

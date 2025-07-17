@@ -1,6 +1,5 @@
 {
     "api_key": "your-rabbit-api-key",
-    "base_url": "https://api.rabbit.com/v1",
     "default_pricing_mode": "on_demand",
     "reservation_ids": [
         "project:us-central1.reservation-name1",
