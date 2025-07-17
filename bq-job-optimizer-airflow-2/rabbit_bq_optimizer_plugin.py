@@ -48,7 +48,7 @@ def patch_bigquery_hook():
                 
                 client = RabbitBQJobOptimizer(
                     api_key=config["api_key"],
-                    base_url=config["base_url"]
+                    base_url=config.get("base_url")
                 )
                 logging.debug("Rabbit BQ Optimizer: Client initialized successfully")
 
