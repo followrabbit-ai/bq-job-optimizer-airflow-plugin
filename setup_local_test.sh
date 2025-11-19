@@ -116,7 +116,7 @@ echo "Deploying plugin..."
 cp bq-job-optimizer-airflow-2/rabbit_bq_optimizer_plugin.py "$PLUGIN_DIR/"
 
 echo "Deploying test DAG..."
-cp test_dag.py "$DAGS_DIR/"
+cp bq-job-optimizer-airflow-2/test_dag.py "$DAGS_DIR/"
 
 # Setup configuration
 echo "Configuring Airflow..."

@@ -147,6 +147,7 @@ A setup script `setup_local_test.sh` is provided in the root directory to help y
    ```bash
    source venv/bin/activate
    export AIRFLOW_HOME=$(pwd)/airflow_home
+   cd bq-job-optimizer-airflow-2
    python test_plugin_connection.py
    ```
    This verifies that the plugin can load credentials from the Airflow connection.
@@ -155,6 +156,7 @@ A setup script `setup_local_test.sh` is provided in the root directory to help y
    ```bash
    source venv/bin/activate
    export AIRFLOW_HOME=$(pwd)/airflow_home
+   cd bq-job-optimizer-airflow-2
    python test_dag_execution.py
    ```
    This simulates a DAG execution and verifies that:
@@ -260,6 +262,33 @@ If you see this error, it means the Airflow variable `rabbit_bq_optimizer_config
    ```
 3. Verified the JSON is properly formatted without any syntax errors
 
+## Development
+
+### Pre-commit Hooks
+
+This repository uses pre-commit hooks to ensure code quality. To set them up:
+
+```bash
+# Install pre-commit
+pip install pre-commit
+
+# Install the hooks
+pre-commit install
+
+# (Optional) Run hooks on all files
+pre-commit run --all-files
+```
+
+The hooks will automatically:
+- Check code formatting with Black
+- Run linting with Ruff
+- Check for common issues (trailing whitespace, large files, etc.)
+
+### CI/CD
+
+GitHub Actions automatically runs on every push and pull request:
+- **Linting and Formatting**: Checks code style with Black and Ruff
+- **Tests**: Runs test suite on Python 3.9, 3.10, 3.11, and 3.12
 
 ## Uninstalling
 

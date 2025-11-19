@@ -1,20 +1,20 @@
-from datetime import datetime, timedelta
+from datetime import datetime
+
 from airflow import DAG
 from airflow.providers.google.cloud.operators.bigquery import BigQueryInsertJobOperator
-from airflow.operators.python import PythonOperator
 
 default_args = {
-    'owner': 'airflow',
-    'depends_on_past': False,
-    'email_on_failure': False,
-    'email_on_retry': False,
-    'retries': 0,
+    "owner": "airflow",
+    "depends_on_past": False,
+    "email_on_failure": False,
+    "email_on_retry": False,
+    "retries": 0,
 }
 
 with DAG(
-    'rabbit_optimizer_test',
+    "rabbit_optimizer_test",
     default_args=default_args,
-    description='Test DAG for Rabbit BQ Optimizer Plugin',
+    description="Test DAG for Rabbit BQ Optimizer Plugin",
     schedule_interval=None,
     start_date=datetime(2024, 1, 1),
     catchup=False,
@@ -34,4 +34,3 @@ with DAG(
     )
 
     insert_query_job
-
