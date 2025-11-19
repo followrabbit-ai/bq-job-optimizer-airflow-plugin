@@ -32,5 +32,3 @@ with DAG(
         # We don't actually want to hit BQ in this test, just verify the hook patch
         # The plugin should log before the operator tries to execute
     )
-
-    insert_query_job

@@ -5,7 +5,7 @@ BigQuery jobs and calls the Rabbit optimization API with connection credentials.
 """
 import os
 import sys
-from unittest.mock import patch, MagicMock
+from unittest.mock import MagicMock, patch
 
 # Set up Airflow environment
 # When running from the repo root, airflow_home is in the parent directory
@@ -69,9 +69,7 @@ def test_dag_execution_with_optimizer():
         """Mock the original insert_job that would actually submit to BigQuery."""
         original_insert_job_called.append(True)
         original_config_received.append(configuration)
-        print(
-            f"  → Original insert_job called with config keys: {list(configuration.keys())}"
-        )
+        print(f"  → Original insert_job called with config keys: {list(configuration.keys())}")
 
         # Return a mock BigQueryJob
         mock_job = MagicMock(spec=BigQueryJob)
@@ -120,14 +118,10 @@ def test_dag_execution_with_optimizer():
     try:
         hook = BigQueryHook()
 
-        test_job_config = {
-            "query": {"query": "SELECT 1 AS test", "useLegacySql": False}
-        }
+        test_job_config = {"query": {"query": "SELECT 1 AS test", "useLegacySql": False}}
 
         # Patch RabbitBQJobOptimizer to use our mock
-        with patch(
-            "rabbit_bq_optimizer_plugin.RabbitBQJobOptimizer", return_value=mock_client
-        ):
+        with patch("rabbit_bq_optimizer_plugin.RabbitBQJobOptimizer", return_value=mock_client):
             # Call the patched insert_job
             result = hook.insert_job(configuration=test_job_config)
 

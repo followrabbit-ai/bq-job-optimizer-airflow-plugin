@@ -14,8 +14,8 @@ os.environ["AIRFLOW_HOME"] = os.path.join(repo_root, "airflow_home")
 sys.path.insert(0, os.path.join(os.environ["AIRFLOW_HOME"], "plugins"))
 
 # Import Airflow components
-from airflow.hooks.base import BaseHook  # noqa: E402
 from airflow.exceptions import AirflowException  # noqa: E402
+from airflow.hooks.base import BaseHook  # noqa: E402
 
 # Import the plugin's connection loading function
 from rabbit_bq_optimizer_plugin import (  # noqa: E402
@@ -30,12 +30,9 @@ def test_connection_loading():
 
     try:
         credentials = _load_rabbit_credentials()
-        print(
-            f"✓ Successfully loaded credentials from connection '{RABBIT_API_CONN_ID}'"
-        )
-        print(
-            f"  - API Key: {'*' * len(credentials['api_key']) if credentials['api_key'] else 'MISSING'}"
-        )
+        print(f"✓ Successfully loaded credentials from connection '{RABBIT_API_CONN_ID}'")
+        masked_key = "*" * len(credentials["api_key"]) if credentials["api_key"] else "MISSING"
+        print(f"  - API Key: {masked_key}")
         print(f"  - Base URL: {credentials['base_url']}")
         return True
     except RuntimeError as e:
@@ -58,9 +55,7 @@ def test_connection_exists():
         print("✓ Connection found")
         print(f"  - Type: {connection.conn_type}")
         print(f"  - Has password: {'Yes' if connection.password else 'No'}")
-        print(
-            f"  - Extra: {connection.extra_dejson if connection.extra_dejson else 'None'}"
-        )
+        print(f"  - Extra: {connection.extra_dejson if connection.extra_dejson else 'None'}")
         return True
     except AirflowException as e:
         print(f"✗ Connection not found: {e}")

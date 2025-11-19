@@ -280,8 +280,8 @@ pre-commit run --all-files
 ```
 
 The hooks will automatically:
-- Check code formatting with Black
-- Run linting with Ruff
+- Check formatting with `black --check --diff` (same as CI)
+- Run `ruff check` with the same configuration used in CI
 - Check for common issues (trailing whitespace, large files, etc.)
 
 ### CI/CD

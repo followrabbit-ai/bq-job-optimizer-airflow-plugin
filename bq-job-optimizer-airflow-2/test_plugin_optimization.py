@@ -5,7 +5,7 @@ and calls the optimization API with credentials from the Airflow connection.
 """
 import os
 import sys
-from unittest.mock import patch, MagicMock
+from unittest.mock import MagicMock, patch
 
 # Set up Airflow environment
 os.environ["AIRFLOW_HOME"] = os.path.join(os.path.dirname(__file__), "airflow_home")
@@ -16,7 +16,7 @@ from airflow.hooks.base import BaseHook
 from airflow.models import Variable
 
 # Import the plugin
-from rabbit_bq_optimizer_plugin import patch_bigquery_hook, RABBIT_API_CONN_ID
+from rabbit_bq_optimizer_plugin import RABBIT_API_CONN_ID, patch_bigquery_hook
 
 
 def setup_test_environment():
@@ -117,11 +117,10 @@ def test_plugin_intercepts_job():
         hook = BigQueryHook()
 
         # Mock the RabbitBQJobOptimizer import
-        with patch(
-            "rabbit_bq_optimizer_plugin.RabbitBQJobOptimizer", return_value=mock_client
-        ):
+        with patch("rabbit_bq_optimizer_plugin.RabbitBQJobOptimizer", return_value=mock_client):
             # Import the module again to get the patched version
             import importlib
+
             import rabbit_bq_optimizer_plugin
 
             importlib.reload(rabbit_bq_optimizer_plugin)
@@ -138,9 +137,7 @@ def test_plugin_intercepts_job():
             # Verify the original was called (meaning optimization happened)
             if original_insert_job_called:
                 print("✓ Plugin intercepted job and called original insert_job")
-                print(
-                    f"  - Original insert_job called: {len(original_insert_job_called)} time(s)"
-                )
+                print(f"  - Original insert_job called: {len(original_insert_job_called)} time(s)")
                 return True
             else:
                 print("✗ Original insert_job was not called")
@@ -191,24 +188,18 @@ def test_plugin_handles_missing_connection():
 
         # Temporarily rename the connection check
         # We'll just verify the function raises RuntimeError for missing connection
-        with patch(
-            "rabbit_bq_optimizer_plugin.BaseHook.get_connection"
-        ) as mock_get_conn:
+        with patch("rabbit_bq_optimizer_plugin.BaseHook.get_connection") as mock_get_conn:
             from airflow.exceptions import AirflowException
 
             mock_get_conn.side_effect = AirflowException("Connection not found")
 
             try:
                 _load_rabbit_credentials()
-                print(
-                    "✗ Function should have raised RuntimeError for missing connection"
-                )
+                print("✗ Function should have raised RuntimeError for missing connection")
                 return False
             except RuntimeError as e:
                 if "could not be loaded" in str(e):
-                    print(
-                        "✓ Plugin correctly raises RuntimeError for missing connection"
-                    )
+                    print("✓ Plugin correctly raises RuntimeError for missing connection")
                     return True
                 else:
                     print(f"✗ Unexpected error message: {e}")

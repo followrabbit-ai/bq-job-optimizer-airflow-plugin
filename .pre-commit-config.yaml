@@ -17,13 +17,11 @@ repos:
       - id: black
         language_version: python3
         files: ^bq-job-optimizer-airflow-2/.*\.py$
+        args: [--check, --diff]
 
   - repo: https://github.com/astral-sh/ruff-pre-commit
     rev: v0.3.4
     hooks:
       - id: ruff
-        args: [--fix, --exit-non-zero-on-fix]
-        files: ^bq-job-optimizer-airflow-2/.*\.py$
-      - id: ruff-format
         files: ^bq-job-optimizer-airflow-2/.*\.py$
 

@@ -23,6 +23,8 @@ extend-exclude = '''
 [tool.ruff]
 line-length = 100
 target-version = "py39"
+
+[tool.ruff.lint]
 select = [
     "E",  # pycodestyle errors
     "W",  # pycodestyle warnings
@@ -36,7 +38,7 @@ ignore = [
     "E402", # Module level import not at top of file (needed for test scripts that set up environment first)
 ]
 
-[tool.ruff.per-file-ignores]
+[tool.ruff.lint.per-file-ignores]
 "bq-job-optimizer-airflow-2/test_*.py" = ["E402"]
 
 [tool.ruff.format]
