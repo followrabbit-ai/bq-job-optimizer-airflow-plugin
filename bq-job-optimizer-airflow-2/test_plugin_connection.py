@@ -36,9 +36,7 @@ def test_connection_loading():
         print(
             f"  - API Key: {'*' * len(credentials['api_key']) if credentials['api_key'] else 'MISSING'}"
         )
-        print(
-            f"  - Base URL: {credentials['base_url'] or 'Not set (will use default)'}"
-        )
+        print(f"  - Base URL: {credentials['base_url']}")
         return True
     except RuntimeError as e:
         print(f"✗ Failed to load connection: {e}")
