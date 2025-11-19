@@ -1,5 +1,4 @@
 import logging
-from typing import Optional
 
 from airflow.exceptions import AirflowException
 from airflow.hooks.base import BaseHook
@@ -11,32 +10,6 @@ from rabbit_bq_job_optimizer import OptimizationConfig, RabbitBQJobOptimizer
 RABBIT_PATCHED_MARKER = "_rabbit_bq_job_optimizer_patched"
 RABBIT_API_CONN_ID = "rabbit_api"
 RABBIT_API_BASE_URL_EXTRA_KEY = "api_base_url"
-RABBIT_API_BASE_PATH_EXTRA_KEY = "api_base_path"
-
-
-def _build_base_url_from_connection(connection, extras: dict) -> Optional[str]:
-    base_url = extras.get(RABBIT_API_BASE_URL_EXTRA_KEY) or extras.get("base_url")
-    if base_url:
-        return base_url
-
-    host = (connection.host or "").strip()
-    if not host:
-        return None
-
-    if host.startswith("http://") or host.startswith("https://"):
-        base_url = host
-    else:
-        schema = connection.schema or "https"
-        netloc = host
-        if connection.port:
-            netloc = f"{netloc}:{connection.port}"
-        base_url = f"{schema}://{netloc}"
-
-    base_path = extras.get(RABBIT_API_BASE_PATH_EXTRA_KEY)
-    if base_path:
-        base_url = f"{base_url.rstrip('/')}/{base_path.lstrip('/')}"
-
-    return base_url
 
 
 def _load_rabbit_credentials():
@@ -52,7 +25,18 @@ def _load_rabbit_credentials():
         )
 
     extras = connection.extra_dejson or {}
-    base_url = _build_base_url_from_connection(connection, extras)
+    base_url = extras.get(RABBIT_API_BASE_URL_EXTRA_KEY)
+    if not base_url:
+        raise RuntimeError(
+            f"Airflow connection '{RABBIT_API_CONN_ID}' is missing the required '{RABBIT_API_BASE_URL_EXTRA_KEY}' field in extra. "
+            f"Please set it in the connection's Extra field as JSON: {{\"{RABBIT_API_BASE_URL_EXTRA_KEY}\": \"https://api.followrabbit.ai/bq-job-optimizer\"}}"
+        )
+    
+    base_url = base_url.strip()
+    if not base_url:
+        raise RuntimeError(
+            f"Airflow connection '{RABBIT_API_CONN_ID}' has an empty '{RABBIT_API_BASE_URL_EXTRA_KEY}' field"
+        )
 
     return {
         "api_key": api_key,

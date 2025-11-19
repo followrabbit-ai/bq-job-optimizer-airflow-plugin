@@ -43,15 +43,12 @@ For security reasons the Rabbit API key must be stored in an Airflow connection 
 - `Conn Type`: `Generic` (or `HTTP`)
 - `Conn ID`: `rabbit_api`
 - `Password`: Rabbit API key (required)
-- `Extra` (optional):
+- `Extra` (required):
   ```json
   {
-    "api_base_url": "https://api.followrabbit.ai/bq-job-optimizer",
-    "api_base_path": "v1" // only needed when host does not include the path
+    "api_base_url": "https://api.followrabbit.ai/bq-job-optimizer"
   }
   ```
-
-If you prefer using the host/schema fields, set them to build the base URL (e.g., `schema=https`, `host=api.followrabbit.ai/bq-job-optimizer`). The plugin automatically falls back to the production endpoint when no override is provided.
 
 CLI example:
 
