@@ -1,10 +1,63 @@
 import logging
+from typing import Optional
+
+from airflow.exceptions import AirflowException
+from airflow.hooks.base import BaseHook
+from airflow.models import Variable
 from airflow.plugins_manager import AirflowPlugin
 from airflow.utils.log.logging_mixin import LoggingMixin
-from airflow.models import Variable
-from rabbit_bq_job_optimizer import RabbitBQJobOptimizer, OptimizationConfig
+from rabbit_bq_job_optimizer import OptimizationConfig, RabbitBQJobOptimizer
 
 RABBIT_PATCHED_MARKER = "_rabbit_bq_job_optimizer_patched"
+RABBIT_API_CONN_ID = "rabbit_api"
+RABBIT_API_BASE_URL_EXTRA_KEY = "api_base_url"
+RABBIT_API_BASE_PATH_EXTRA_KEY = "api_base_path"
+
+
+def _build_base_url_from_connection(connection, extras: dict) -> Optional[str]:
+    base_url = extras.get(RABBIT_API_BASE_URL_EXTRA_KEY) or extras.get("base_url")
+    if base_url:
+        return base_url
+
+    host = (connection.host or "").strip()
+    if not host:
+        return None
+
+    if host.startswith("http://") or host.startswith("https://"):
+        base_url = host
+    else:
+        schema = connection.schema or "https"
+        netloc = host
+        if connection.port:
+            netloc = f"{netloc}:{connection.port}"
+        base_url = f"{schema}://{netloc}"
+
+    base_path = extras.get(RABBIT_API_BASE_PATH_EXTRA_KEY)
+    if base_path:
+        base_url = f"{base_url.rstrip('/')}/{base_path.lstrip('/')}"
+
+    return base_url
+
+
+def _load_rabbit_credentials():
+    try:
+        connection = BaseHook.get_connection(RABBIT_API_CONN_ID)
+    except AirflowException as exc:
+        raise RuntimeError(f"Airflow connection '{RABBIT_API_CONN_ID}' could not be loaded") from exc
+
+    api_key = (connection.password or "").strip()
+    if not api_key:
+        raise RuntimeError(
+            f"Airflow connection '{RABBIT_API_CONN_ID}' is missing the password field which must contain the Rabbit API key"
+        )
+
+    extras = connection.extra_dejson or {}
+    base_url = _build_base_url_from_connection(connection, extras)
+
+    return {
+        "api_key": api_key,
+        "base_url": base_url,
+    }
 
 def patch_bigquery_hook():
     from airflow.providers.google.cloud.hooks.bigquery import BigQueryHook, BigQueryJob
@@ -27,7 +80,7 @@ def patch_bigquery_hook():
                     return original_insert_job(self, configuration=configuration, **kwargs)
 
                 # Validate required fields
-                required_fields = ["api_key", "reservation_ids", "default_pricing_mode"]
+                required_fields = ["reservation_ids", "default_pricing_mode"]
                 missing_fields = [field for field in required_fields if field not in config]
                 if missing_fields:
                     logging.warning("Rabbit BQ Optimizer: Missing required configuration fields: %s. Proceeding with original job configuration.", ", ".join(missing_fields))
@@ -46,9 +99,15 @@ def patch_bigquery_hook():
 
                 logging.debug("Rabbit BQ Optimizer: Original job configuration: %s", configuration)
                 
+                try:
+                    credentials = _load_rabbit_credentials()
+                except Exception as e:
+                    logging.warning("Rabbit BQ Optimizer: Failed to load Rabbit API connection '%s': %s. Proceeding with original job configuration.", RABBIT_API_CONN_ID, str(e))
+                    return original_insert_job(self, configuration=configuration, **kwargs)
+
                 client = RabbitBQJobOptimizer(
-                    api_key=config["api_key"],
-                    base_url=config.get("base_url")
+                    api_key=credentials["api_key"],
+                    base_url=credentials["base_url"]
                 )
                 logging.debug("Rabbit BQ Optimizer: Client initialized successfully")
 
@@ -70,6 +129,7 @@ def patch_bigquery_hook():
 
             except Exception as e:
                 logging.warning("Rabbit BQ Optimizer: Optimization failed due to error: %s. Proceeding with original job configuration.", str(e))
+                return original_insert_job(self, configuration=configuration, **kwargs)
             
             try:
                 result = original_insert_job(self, configuration=optimizedJobConfiguration, **kwargs)
