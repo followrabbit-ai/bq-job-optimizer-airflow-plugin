@@ -85,16 +85,23 @@ fi
 # Activate virtual environment
 source venv/bin/activate
 
-# Install dependencies
+# Install dependencies with Airflow constraint files
 echo "Installing dependencies..."
-# Install Airflow with dependencies (needs re2 and other core deps)
-pip install apache-airflow==2.9.1
+AIRFLOW_VERSION="2.9.1"
+PY_VERSION=$(python -c "import sys; print(f\"{sys.version_info[0]}.{sys.version_info[1]}\")")
+CONSTRAINT_URL="https://raw.githubusercontent.com/apache/airflow/constraints-${AIRFLOW_VERSION}/constraints-${PY_VERSION}.txt"
 
-# Install other packages
-pip install rabbit-bq-job-optimizer google-cloud-bigquery
-
-# Install provider without deps to avoid pulling in unnecessary Google services
-pip install apache-airflow-providers-google --no-deps
+echo "Using constraint file: $CONSTRAINT_URL"
+pip install "apache-airflow==${AIRFLOW_VERSION}" --constraint "${CONSTRAINT_URL}"
+pip install -r bq-job-optimizer-airflow-2/test_requirements.txt --constraint "${CONSTRAINT_URL}"
+pip install --constraint "${CONSTRAINT_URL}" \
+    google-auth-httplib2 \
+    google-api-python-client \
+    pandas-gbq \
+    gcloud-aio-bigquery \
+    gcloud-aio-storage \
+    google-cloud-secret-manager \
+    google-cloud-storage
 
 # Initialize Airflow DB
 if [ ! -f "$AIRFLOW_HOME/airflow.db" ]; then

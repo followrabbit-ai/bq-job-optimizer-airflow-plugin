@@ -116,14 +116,14 @@ A setup script `setup_local_test.sh` is provided in the root directory to help y
    ```
    This script will:
    - Create a virtual environment (if not present)
-   - Install Airflow and dependencies from `test_requirements.txt`
+  - Install Airflow using the official constraints file plus dependencies from `test_requirements.txt`
    - Initialize the Airflow database
    - Create an admin user
    - Deploy the plugin and test DAG
    - Configure the `rabbit_api` connection (with a dummy key)
    - Configure the `rabbit_bq_optimizer_config` variable
 
-   *Note: The script installs Airflow with all its dependencies (including `google-re2`). The Google provider is installed with `--no-deps` to avoid pulling in unnecessary Google service libraries. Core packages installed: `apache-airflow`, `rabbit-bq-job-optimizer`, `apache-airflow-providers-google`, and `google-cloud-bigquery`.*
+  *Note: The script installs Airflow using the official constraints file for your Python version so that binary wheels (including `google-re2`) are used. Additional dependencies (`rabbit-bq-job-optimizer`, `apache-airflow-providers-google`, `google-cloud-bigquery`, etc.) are installed with the same constraints to match the Airflow release.*
 
 2. **Run the test DAG:**
    The setup script automatically deploys `test_dag.py` to the DAGs directory.
