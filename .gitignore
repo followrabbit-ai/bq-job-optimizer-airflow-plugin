@@ -194,3 +194,6 @@ cython_debug/
 .cursorindexingignore
 
 .vscode/airflow_home/
+
+# Local Airflow state used for tests
+airflow_home/
