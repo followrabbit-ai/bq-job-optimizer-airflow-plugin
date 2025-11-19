@@ -29,20 +29,11 @@ def _load_rabbit_credentials():
 
     extras = connection.extra_dejson or {}
     base_url = extras.get(RABBIT_API_BASE_URL_EXTRA_KEY)
-    if not base_url:
-        raise RuntimeError(
-            f"Airflow connection '{RABBIT_API_CONN_ID}' is missing the required "
-            f"'{RABBIT_API_BASE_URL_EXTRA_KEY}' field in extra. Please set it in the "
-            "connection's Extra field as JSON: "
-            f'{{"{RABBIT_API_BASE_URL_EXTRA_KEY}": "https://api.followrabbit.ai/bq-job-optimizer"}}'
-        )
 
-    base_url = base_url.strip()
-    if not base_url:
-        raise RuntimeError(
-            f"Airflow connection '{RABBIT_API_CONN_ID}' has an empty "
-            f"'{RABBIT_API_BASE_URL_EXTRA_KEY}' field"
-        )
+    if base_url:
+        base_url = base_url.strip()
+        if not base_url:
+            base_url = None
 
     return {
         "api_key": api_key,
@@ -62,7 +53,9 @@ def patch_bigquery_hook():
             try:
                 # Try to get the configuration
                 try:
-                    config = Variable.get("rabbit_bq_optimizer_config", deserialize_json=True)
+                    config = Variable.get(
+                        "rabbit_bq_optimizer_config", deserialize_json=True
+                    )
                     if not config:
                         raise KeyError("rabbit_bq_optimizer_config is empty")
                     logging.debug(
@@ -75,18 +68,24 @@ def patch_bigquery_hook():
                         "original job configuration.",
                         str(e),
                     )
-                    return original_insert_job(self, configuration=configuration, **kwargs)
+                    return original_insert_job(
+                        self, configuration=configuration, **kwargs
+                    )
 
                 # Validate required fields
                 required_fields = ["reservation_ids", "default_pricing_mode"]
-                missing_fields = [field for field in required_fields if field not in config]
+                missing_fields = [
+                    field for field in required_fields if field not in config
+                ]
                 if missing_fields:
                     logging.warning(
                         "Rabbit BQ Optimizer: Missing required configuration fields: "
                         "%s. Proceeding with original job configuration.",
                         ", ".join(missing_fields),
                     )
-                    return original_insert_job(self, configuration=configuration, **kwargs)
+                    return original_insert_job(
+                        self, configuration=configuration, **kwargs
+                    )
 
                 # Validate default_pricing_mode
                 valid_pricing_modes = ["on_demand", "slot_based"]
@@ -97,16 +96,22 @@ def patch_bigquery_hook():
                         config["default_pricing_mode"],
                         ", ".join(valid_pricing_modes),
                     )
-                    return original_insert_job(self, configuration=configuration, **kwargs)
+                    return original_insert_job(
+                        self, configuration=configuration, **kwargs
+                    )
 
                 if not config["reservation_ids"]:
                     logging.warning(
                         "Rabbit BQ Optimizer: No reservation IDs configured. Proceeding "
                         "with original job configuration."
                     )
-                    return original_insert_job(self, configuration=configuration, **kwargs)
+                    return original_insert_job(
+                        self, configuration=configuration, **kwargs
+                    )
 
-                logging.debug("Rabbit BQ Optimizer: Original job configuration: %s", configuration)
+                logging.debug(
+                    "Rabbit BQ Optimizer: Original job configuration: %s", configuration
+                )
 
                 try:
                     credentials = _load_rabbit_credentials()
@@ -117,7 +122,9 @@ def patch_bigquery_hook():
                         RABBIT_API_CONN_ID,
                         str(e),
                     )
-                    return original_insert_job(self, configuration=configuration, **kwargs)
+                    return original_insert_job(
+                        self, configuration=configuration, **kwargs
+                    )
 
                 client = RabbitBQJobOptimizer(
                     api_key=credentials["api_key"], base_url=credentials["base_url"]
@@ -142,7 +149,9 @@ def patch_bigquery_hook():
                     configuration={"configuration": configuration},
                     enabledOptimizations=[optimizationConfig],
                 )
-                logging.info("Rabbit BQ Optimizer: Received optimization result: %s", result)
+                logging.info(
+                    "Rabbit BQ Optimizer: Received optimization result: %s", result
+                )
 
                 optimizedJobConfiguration = result.optimizedJob["configuration"]
 

@@ -43,12 +43,13 @@ For security reasons the Rabbit API key must be stored in an Airflow connection 
 - `Conn Type`: `Generic` (or `HTTP`)
 - `Conn ID`: `rabbit_api`
 - `Password`: Rabbit API key (required)
-- `Extra` (required):
+- `Extra` (optional):
   ```json
   {
     "api_base_url": "https://api.followrabbit.ai/bq-job-optimizer"
   }
   ```
+  Only include `api_base_url` if you need to override the default Rabbit endpoint; otherwise it will fall back automatically.
 
 CLI example:
 
