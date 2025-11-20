@@ -16,17 +16,17 @@ NC='\033[0m'
 # Cleanup function
 cleanup() {
     echo -e "${YELLOW}Cleaning up local test environment...${NC}"
-    
+
     if [ -d "venv" ]; then
         echo "Removing virtual environment..."
         rm -rf venv
     fi
-    
+
     if [ -d "$AIRFLOW_HOME" ]; then
         echo "Removing Airflow home directory..."
         rm -rf "$AIRFLOW_HOME"
     fi
-    
+
     echo -e "${GREEN}Cleanup complete!${NC}"
     exit 0
 }
@@ -72,13 +72,13 @@ if [ ! -d "venv" ]; then
             fi
         fi
     done
-    
+
     if [ -z "$PYTHON_CMD" ]; then
         echo "ERROR: No compatible Python version found (requires Python 3.8-3.12)"
         echo "Please install Python 3.8-3.12 and try again"
         exit 1
     fi
-    
+
     $PYTHON_CMD -m venv venv
 fi
 
@@ -107,7 +107,7 @@ pip install --constraint "${CONSTRAINT_URL}" \
 if [ ! -f "$AIRFLOW_HOME/airflow.db" ]; then
     echo "Initializing Airflow database..."
     airflow db init
-    
+
     echo "Creating admin user..."
     airflow users create \
         --username admin \

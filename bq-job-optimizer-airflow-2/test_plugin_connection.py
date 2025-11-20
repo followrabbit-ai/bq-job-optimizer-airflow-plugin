@@ -3,6 +3,7 @@
 Simple test script to validate the Rabbit BQ Optimizer plugin's connection loading.
 This tests the core functionality without requiring a full DAG execution.
 """
+
 import os
 import sys
 from unittest.mock import MagicMock, patch

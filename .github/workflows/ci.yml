@@ -16,20 +16,20 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      
+
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-      
+
       - name: Install dependencies
         run: |
           pip install black ruff
-      
+
       - name: Check formatting with Black
         run: |
           black --check --diff bq-job-optimizer-airflow-2/*.py
-      
+
       - name: Lint with Ruff
         run: |
           ruff check bq-job-optimizer-airflow-2/*.py
@@ -40,15 +40,15 @@ jobs:
     strategy:
       matrix:
         python-version: ['3.9', '3.10', '3.11', '3.12']
-    
+
     steps:
       - uses: actions/checkout@v4
-      
+
       - name: Set up Python ${{ matrix.python-version }}
         uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python-version }}
-      
+
       - name: Install dependencies
         env:
           AIRFLOW_VERSION: 2.9.1
@@ -60,7 +60,7 @@ jobs:
           pip install "apache-airflow==${AIRFLOW_VERSION}" --constraint "${CONSTRAINT_URL}"
           pip install -r bq-job-optimizer-airflow-2/test_requirements.txt --constraint "${CONSTRAINT_URL}"
           pip install --constraint "${CONSTRAINT_URL}" google-auth-httplib2 google-api-python-client pandas-gbq gcloud-aio-bigquery gcloud-aio-storage google-cloud-secret-manager google-cloud-storage
-      
+
       - name: Set up Airflow
         run: |
           export AIRFLOW_HOME=$(pwd)/airflow_home
@@ -73,18 +73,17 @@ jobs:
           airflow variables set rabbit_bq_optimizer_config '{"default_pricing_mode": "on_demand", "reservation_ids": ["project:us-central1.test-reservation"]}' || true
         env:
           AIRFLOW_HOME: ${{ github.workspace }}/airflow_home
-      
+
       - name: Run connection test
         run: |
           export AIRFLOW_HOME=$(pwd)/airflow_home
           python bq-job-optimizer-airflow-2/test_plugin_connection.py
         env:
           AIRFLOW_HOME: ${{ github.workspace }}/airflow_home
-      
+
       - name: Run DAG execution test
         run: |
           export AIRFLOW_HOME=$(pwd)/airflow_home
           python bq-job-optimizer-airflow-2/test_dag_execution.py
         env:
           AIRFLOW_HOME: ${{ github.workspace }}/airflow_home
-

@@ -3,6 +3,7 @@
 Test script that simulates DAG execution and verifies the plugin intercepts
 BigQuery jobs and calls the Rabbit optimization API with connection credentials.
 """
+
 import os
 import sys
 from unittest.mock import MagicMock, patch

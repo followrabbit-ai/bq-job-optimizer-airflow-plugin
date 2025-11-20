@@ -19,7 +19,6 @@ with DAG(
     start_date=datetime(2024, 1, 1),
     catchup=False,
 ) as dag:
-
     # Simple query job that should be intercepted
     insert_query_job = BigQueryInsertJobOperator(
         task_id="test_optimization",

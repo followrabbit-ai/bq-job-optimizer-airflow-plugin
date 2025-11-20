@@ -3,6 +3,7 @@
 Test script to validate that the Rabbit BQ Optimizer plugin intercepts BigQuery jobs
 and calls the optimization API with credentials from the Airflow connection.
 """
+
 import os
 import sys
 from unittest.mock import MagicMock, patch
