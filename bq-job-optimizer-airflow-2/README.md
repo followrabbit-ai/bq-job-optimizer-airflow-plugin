@@ -36,11 +36,36 @@ cp rabbit_bq_optimizer_plugin.py $AIRFLOW_HOME/plugins/
 
 ## Configuration
 
-The plugin uses a single Airflow variable for configuration. Create a JSON configuration with the following structure:
+### 1. Create the Rabbit API connection
+
+For security reasons the Rabbit API key must be stored in an Airflow connection instead of a variable. The plugin expects a connection with ID `rabbit_api`:
+
+- `Conn Type`: `Generic` (or `HTTP`)
+- `Conn ID`: `rabbit_api`
+- `Password`: Rabbit API key (required)
+- `Extra` (optional):
+  ```json
+  {
+    "api_base_url": "https://api.followrabbit.ai/bq-job-optimizer"
+  }
+  ```
+  Only include `api_base_url` if you need to override the default Rabbit endpoint; otherwise it will fall back automatically.
+
+CLI example:
+
+```bash
+airflow connections add rabbit_api \
+    --conn-type generic \
+    --conn-password "<your-rabbit-api-key>" \
+    --conn-extra '{"api_base_url": "https://api.followrabbit.ai/bq-job-optimizer"}'
+```
+
+### 2. Set the optimization parameters
+
+The remaining optimizer configuration stays in an Airflow variable. Create a JSON configuration with the following structure:
 
 ```json
 {
-    "api_key": "your-rabbit-api-key",
     "default_pricing_mode": "on_demand",
     "reservation_ids": [
         "project:region.reservation-name1",
@@ -51,7 +76,6 @@ The plugin uses a single Airflow variable for configuration. Create a JSON confi
 
 ### Configuration Fields
 
-- `api_key` (required): Your Rabbit API key
 - `default_pricing_mode` (required): The default pricing mode for jobs. Must be one of: `"on_demand"` or `"slot_based"`
 - `reservation_ids` (required): List of reservation IDs in the format "project:region.reservation-name"
 
@@ -62,7 +86,6 @@ You can set the configuration in two ways:
 1. Using the Airflow CLI:
 ```bash
 airflow variables set rabbit_bq_optimizer_config '{
-    "api_key": "your-rabbit-api-key",
     "default_pricing_mode": "on_demand",
     "reservation_ids": [
         "project:region.reservation-name1",
@@ -75,6 +98,114 @@ airflow variables set rabbit_bq_optimizer_config '{
    - Go to Admin -> Variables
    - Add a new variable named `rabbit_bq_optimizer_config`
    - Paste the JSON configuration
+
+## End-to-End Test Plan
+
+### Local Testing
+
+A setup script `setup_local_test.sh` is provided in the root directory to help you spin up a local Airflow environment for testing.
+
+**Prerequisites:**
+- Python 3.8-3.12 (Airflow 2.9.1 requirement; the script will automatically detect and use a compatible version)
+- `pip`
+
+**Steps:**
+
+1. **Run the setup script:**
+   ```bash
+   ./setup_local_test.sh
+   ```
+   This script will:
+   - Create a virtual environment (if not present)
+  - Install Airflow using the official constraints file plus dependencies from `test_requirements.txt`
+   - Initialize the Airflow database
+   - Create an admin user
+   - Deploy the plugin and test DAG
+   - Configure the `rabbit_api` connection (with a dummy key)
+   - Configure the `rabbit_bq_optimizer_config` variable
+
+  *Note: The script installs Airflow using the official constraints file for your Python version so that binary wheels (including `google-re2`) are used. Additional dependencies (`rabbit-bq-job-optimizer`, `apache-airflow-providers-google`, `google-cloud-bigquery`, etc.) are installed with the same constraints to match the Airflow release.*
+
+2. **Run the test DAG:**
+   The setup script automatically deploys `test_dag.py` to the DAGs directory.
+
+   Execute the test DAG:
+   ```bash
+   source venv/bin/activate
+   export AIRFLOW_HOME=$(pwd)/airflow_home
+   airflow dags test rabbit_optimizer_test $(date +%Y-%m-%d)
+   ```
+
+3. **Verify Results:**
+   Check the logs for the following:
+   - `Rabbit BQ Optimizer: Client initialized successfully`
+   - `Rabbit BQ Optimizer: Received optimization result` (or failure if using dummy key/URL)
+
+4. **Run automated tests:**
+   After setup, you can run automated tests to validate the plugin:
+
+   **Test connection loading:**
+   ```bash
+   source venv/bin/activate
+   export AIRFLOW_HOME=$(pwd)/airflow_home
+   cd bq-job-optimizer-airflow-2
+   python test_plugin_connection.py
+   ```
+   This verifies that the plugin can load credentials from the Airflow connection.
+
+   **Test DAG execution (full integration):**
+   ```bash
+   source venv/bin/activate
+   export AIRFLOW_HOME=$(pwd)/airflow_home
+   cd bq-job-optimizer-airflow-2
+   python test_dag_execution.py
+   ```
+   This simulates a DAG execution and verifies that:
+   - The plugin intercepts BigQuery jobs
+   - The Rabbit optimization API is called with connection credentials
+   - The optimized configuration is used
+
+5. **Cleanup (optional):**
+   To remove the test environment (venv and airflow_home directories):
+   ```bash
+   ./setup_local_test.sh --clean
+   ```
+   Or use the short form:
+   ```bash
+   ./setup_local_test.sh -c
+   ```
+
+### Manual Validation Steps
+
+1. **Connection setup**
+   - Create the `rabbit_api` connection as described above.
+   - Verify the password is populated and (optionally) the base URL override is correct by running `airflow connections get rabbit_api`.
+
+2. **Variable setup**
+   - Set the `rabbit_bq_optimizer_config` variable using the sample JSON (without the API key).
+   - Include at least one reservation ID and confirm the `default_pricing_mode` is valid.
+
+3. **DAG validation**
+   - Deploy the plugin file to `$AIRFLOW_HOME/plugins`.
+   - Restart the scheduler/webserver/workers so the patch is applied.
+   - Trigger a DAG that uses `BigQueryInsertJobOperator` (or any BigQuery operator).
+
+4. **Positive path (connection + variable present)**
+   - Confirm in the scheduler logs that the plugin logs `Client initialized successfully`.
+   - Validate that the BigQuery job request reaches Rabbit (check Rabbit logs or look for the `Rabbit BQ Optimizer: Received optimization result` log line).
+   - For a query with historical data/reservations, verify the resulting BigQuery job uses the optimized configuration.
+
+5. **Missing connection safety net**
+   - Temporarily rename/delete the Airflow connection and re-run the DAG.
+   - The scheduler logs should show `Failed to load Rabbit API connection` and the job should proceed without optimization (ensures graceful fallback).
+
+6. **Custom base URL regression**
+   - Set `api_base_url` in the connection extras to a staging endpoint (or use schema/host).
+   - Trigger a DAG and confirm via Rabbit logs/network traces that the request hits the custom endpoint.
+
+7. **Compatibility check**
+   - Ensure the environment installs the latest `rabbit-bq-job-optimizer` package (e.g., `pip install -U rabbit-bq-job-optimizer`).
+   - Run unit tests or a smoke DAG run to confirm no API contract regressions with the service.
 
 ## Usage
 
@@ -123,7 +254,6 @@ If you see this error, it means the Airflow variable `rabbit_bq_optimizer_config
 2. Set valid JSON content that includes all required fields:
    ```json
    {
-       "api_key": "your-rabbit-api-key", 
        "default_pricing_mode": "on_demand",
        "reservation_ids": [
            "project:us-central1.reservation-name1",
@@ -133,6 +263,35 @@ If you see this error, it means the Airflow variable `rabbit_bq_optimizer_config
    ```
 3. Verified the JSON is properly formatted without any syntax errors
 
+## Development
+
+### Pre-commit Hooks
+
+This repository uses pre-commit hooks to ensure code quality. To set them up:
+
+```bash
+# Install pre-commit
+pip install pre-commit
+
+# Install the hooks
+pre-commit install
+
+# (Optional) Run hooks on all files
+pre-commit run --all-files
+```
+
+The hooks will automatically:
+- **Auto-fix** formatting with Black (CI checks formatting)
+- **Auto-fix** linting issues with Ruff (CI checks linting)
+- Check for common issues (trailing whitespace, large files, etc.)
+
+**Note**: Pre-commit hooks auto-fix issues for convenience, while CI runs in check-only mode to ensure nothing slips through.
+
+### CI/CD
+
+GitHub Actions automatically runs on every push and pull request:
+- **Linting and Formatting**: Checks code style with Black and Ruff
+- **Tests**: Runs test suite on Python 3.9, 3.10, 3.11, and 3.12
 
 ## Uninstalling
 

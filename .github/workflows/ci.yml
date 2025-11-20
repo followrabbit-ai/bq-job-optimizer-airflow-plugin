@@ -1,0 +1,89 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - master
+      - main
+  pull_request:
+    branches:
+      - master
+      - main
+
+jobs:
+  lint-and-format:
+    name: Lint and Format Check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          pip install black ruff
+
+      - name: Check formatting with Black
+        run: |
+          black --check --diff bq-job-optimizer-airflow-2/*.py
+
+      - name: Lint with Ruff
+        run: |
+          ruff check bq-job-optimizer-airflow-2/*.py
+
+  test:
+    name: Run Tests
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ['3.9', '3.10', '3.11', '3.12']
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install dependencies
+        env:
+          AIRFLOW_VERSION: 2.9.1
+        run: |
+          python -m pip install --upgrade pip
+          PY_VERSION=$(python -c "import sys; print(f'{sys.version_info[0]}.{sys.version_info[1]}')")
+          CONSTRAINT_URL="https://raw.githubusercontent.com/apache/airflow/constraints-${AIRFLOW_VERSION}/constraints-${PY_VERSION}.txt"
+          echo "Using constraint file: ${CONSTRAINT_URL}"
+          pip install "apache-airflow==${AIRFLOW_VERSION}" --constraint "${CONSTRAINT_URL}"
+          pip install -r bq-job-optimizer-airflow-2/test_requirements.txt --constraint "${CONSTRAINT_URL}"
+          pip install --constraint "${CONSTRAINT_URL}" google-auth-httplib2 google-api-python-client pandas-gbq gcloud-aio-bigquery gcloud-aio-storage google-cloud-secret-manager google-cloud-storage
+
+      - name: Set up Airflow
+        run: |
+          export AIRFLOW_HOME=$(pwd)/airflow_home
+          mkdir -p $AIRFLOW_HOME/plugins $AIRFLOW_HOME/dags
+          cp bq-job-optimizer-airflow-2/rabbit_bq_optimizer_plugin.py $AIRFLOW_HOME/plugins/
+          cp bq-job-optimizer-airflow-2/test_dag.py $AIRFLOW_HOME/dags/
+          airflow db init
+          echo -e "admin\nadmin\nAdmin\nUser\nadmin@example.com\n" | airflow users create --username admin --firstname Admin --lastname User --role Admin --email admin@example.com || true
+          airflow connections add rabbit_api --conn-type generic --conn-password "test-key" --conn-extra '{"api_base_url": "https://api.followrabbit.ai/bq-job-optimizer"}' || true
+          airflow variables set rabbit_bq_optimizer_config '{"default_pricing_mode": "on_demand", "reservation_ids": ["project:us-central1.test-reservation"]}' || true
+        env:
+          AIRFLOW_HOME: ${{ github.workspace }}/airflow_home
+
+      - name: Run connection test
+        run: |
+          export AIRFLOW_HOME=$(pwd)/airflow_home
+          python bq-job-optimizer-airflow-2/test_plugin_connection.py
+        env:
+          AIRFLOW_HOME: ${{ github.workspace }}/airflow_home
+
+      - name: Run DAG execution test
+        run: |
+          export AIRFLOW_HOME=$(pwd)/airflow_home
+          python bq-job-optimizer-airflow-2/test_dag_execution.py
+        env:
+          AIRFLOW_HOME: ${{ github.workspace }}/airflow_home
