@@ -128,7 +128,7 @@ A setup script `setup_local_test.sh` is provided in the root directory to help y
 
 2. **Run the test DAG:**
    The setup script automatically deploys `test_dag.py` to the DAGs directory.
-   
+
    Execute the test DAG:
    ```bash
    source venv/bin/activate
@@ -143,7 +143,7 @@ A setup script `setup_local_test.sh` is provided in the root directory to help y
 
 4. **Run automated tests:**
    After setup, you can run automated tests to validate the plugin:
-   
+
    **Test connection loading:**
    ```bash
    source venv/bin/activate
@@ -152,7 +152,7 @@ A setup script `setup_local_test.sh` is provided in the root directory to help y
    python test_plugin_connection.py
    ```
    This verifies that the plugin can load credentials from the Airflow connection.
-   
+
    **Test DAG execution (full integration):**
    ```bash
    source venv/bin/activate
@@ -281,9 +281,11 @@ pre-commit run --all-files
 ```
 
 The hooks will automatically:
-- Check formatting with `black --check --diff` (same as CI)
-- Run `ruff check` with the same configuration used in CI
+- **Auto-fix** formatting with Black (CI checks formatting)
+- **Auto-fix** linting issues with Ruff (CI checks linting)
 - Check for common issues (trailing whitespace, large files, etc.)
+
+**Note**: Pre-commit hooks auto-fix issues for convenience, while CI runs in check-only mode to ensure nothing slips through.
 
 ### CI/CD
 
