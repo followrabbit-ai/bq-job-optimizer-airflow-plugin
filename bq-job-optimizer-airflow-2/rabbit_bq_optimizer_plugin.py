@@ -1,6 +1,5 @@
 import logging
 
-from airflow.configuration import conf
 from airflow.exceptions import AirflowException
 from airflow.hooks.base import BaseHook
 from airflow.models import Variable
@@ -11,73 +10,35 @@ from rabbit_bq_job_optimizer import OptimizationConfig, RabbitBQJobOptimizer
 RABBIT_PATCHED_MARKER = "_rabbit_bq_job_optimizer_patched"
 RABBIT_API_CONN_ID = "rabbit_api"
 RABBIT_API_BASE_URL_EXTRA_KEY = "api_base_url"
-RABBIT_CONFIG_SECTION = "rabbit_bq_optimizer"
-RABBIT_CONFIG_API_KEY_KEY = "api_key"
-RABBIT_CONFIG_BASE_URL_KEY = "api_base_url"
 
 
 def _load_rabbit_credentials():
-    """
-    Load Rabbit API credentials from Airflow connection (preferred) or airflow.cfg (fallback).
-
-    Priority:
-    1. Airflow connection 'rabbit_api' (recommended - encrypted)
-    2. airflow.cfg [rabbit_bq_optimizer] section (fallback - not recommended for secrets)
-    """
-    # Try connection first (preferred method)
     try:
         connection = BaseHook.get_connection(RABBIT_API_CONN_ID)
-        api_key = (connection.password or "").strip()
-        if api_key:
-            extras = connection.extra_dejson or {}
-            base_url = extras.get(RABBIT_API_BASE_URL_EXTRA_KEY)
-            if base_url:
-                base_url = base_url.strip()
-                if not base_url:
-                    base_url = None
+    except AirflowException as exc:
+        raise RuntimeError(
+            f"Airflow connection '{RABBIT_API_CONN_ID}' could not be loaded"
+        ) from exc
 
-            logging.debug(
-                "Rabbit BQ Optimizer: Loaded credentials from Airflow connection '%s'",
-                RABBIT_API_CONN_ID,
-            )
-            return {
-                "api_key": api_key,
-                "base_url": base_url,
-            }
-    except AirflowException:
-        # Connection not found or not accessible, try airflow.cfg fallback
-        logging.debug(
-            "Rabbit BQ Optimizer: Connection '%s' not found, trying airflow.cfg fallback",
-            RABBIT_API_CONN_ID,
+    api_key = (connection.password or "").strip()
+    if not api_key:
+        raise RuntimeError(
+            f"Airflow connection '{RABBIT_API_CONN_ID}' is missing the password field "
+            "which must contain the Rabbit API key"
         )
 
-    # Fallback to airflow.cfg
-    try:
-        api_key = conf.get(RABBIT_CONFIG_SECTION, RABBIT_CONFIG_API_KEY_KEY, fallback="").strip()
-        if not api_key:
-            raise RuntimeError(
-                f"Rabbit API key not found in Airflow connection '{RABBIT_API_CONN_ID}' "
-                f"or in airflow.cfg section '[{RABBIT_CONFIG_SECTION}]' "
-                f"key '{RABBIT_CONFIG_API_KEY_KEY}'. Please configure one of these methods."
-            )
+    extras = connection.extra_dejson or {}
+    base_url = extras.get(RABBIT_API_BASE_URL_EXTRA_KEY)
 
-        base_url = conf.get(RABBIT_CONFIG_SECTION, RABBIT_CONFIG_BASE_URL_KEY, fallback="").strip()
+    if base_url:
+        base_url = base_url.strip()
         if not base_url:
             base_url = None
 
-        logging.warning(
-            "Rabbit BQ Optimizer: Using credentials from airflow.cfg. "
-            "Consider using Airflow connections for better security."
-        )
-        return {
-            "api_key": api_key,
-            "base_url": base_url,
-        }
-    except Exception as e:
-        raise RuntimeError(
-            f"Failed to load Rabbit API credentials from connection '{RABBIT_API_CONN_ID}' "
-            f"or airflow.cfg section '[{RABBIT_CONFIG_SECTION}]': {e}"
-        ) from e
+    return {
+        "api_key": api_key,
+        "base_url": base_url,
+    }
 
 
 def patch_bigquery_hook():

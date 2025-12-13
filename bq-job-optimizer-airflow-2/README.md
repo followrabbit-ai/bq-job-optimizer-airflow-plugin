@@ -60,22 +60,6 @@ airflow connections add rabbit_api \
     --conn-extra '{"api_base_url": "https://api.followrabbit.ai/bq-job-optimizer"}'
 ```
 
-**Alternative: Using airflow.cfg (Fallback)**
-
-If you cannot use Airflow connections, you can configure credentials in `airflow.cfg` as a fallback. **Note: This is not recommended for production** as `airflow.cfg` is often stored in version control and not encrypted.
-
-Add the following section to your `airflow.cfg`:
-
-```ini
-[rabbit_bq_optimizer]
-api_key = your-rabbit-api-key-here
-api_base_url = https://api.followrabbit.ai/bq-job-optimizer  # Optional, omit to use default
-```
-
-The plugin will:
-1. First try to load credentials from the Airflow connection `rabbit_api` (recommended)
-2. If the connection is not found, fall back to `airflow.cfg` section `[rabbit_bq_optimizer]`
-
 ### 2. Set the optimization parameters
 
 The remaining optimizer configuration stays in an Airflow variable. Create a JSON configuration with the following structure:
