@@ -78,6 +78,7 @@ The remaining optimizer configuration stays in an Airflow variable. Create a JSO
 
 - `default_pricing_mode` (required): The default pricing mode for jobs. Must be one of: `"on_demand"` or `"slot_based"`
 - `reservation_ids` (required): List of reservation IDs in the format "project:region.reservation-name"
+- `dag_whitelist` (optional): List of DAG IDs to optimize. When omitted or empty, all DAGs are optimized. When specified, only BigQuery jobs from matching DAGs are optimized; all others pass through unmodified.
 
 ### Setting the Configuration
 
@@ -90,9 +91,15 @@ airflow variables set rabbit_bq_optimizer_config '{
     "reservation_ids": [
         "project:region.reservation-name1",
         "project:region.reservation-name2"
+    ],
+    "dag_whitelist": [
+        "my_etl_dag",
+        "my_analytics_dag"
     ]
 }'
 ```
+
+   Omit `dag_whitelist` (or set it to `[]`) to optimize all DAGs.
 
 2. Through the Airflow UI:
    - Go to Admin -> Variables
@@ -164,6 +171,18 @@ A setup script `setup_local_test.sh` is provided in the root directory to help y
    - The plugin intercepts BigQuery jobs
    - The Rabbit optimization API is called with connection credentials
    - The optimized configuration is used
+
+   **Test DAG whitelist filtering:**
+   ```bash
+   source venv/bin/activate
+   export AIRFLOW_HOME=$(pwd)/airflow_home
+   cd bq-job-optimizer-airflow-2
+   python test_dag_whitelist.py
+   ```
+   This verifies the optional `dag_whitelist` feature:
+   - Optimization runs for all DAGs when whitelist is absent or empty
+   - Only whitelisted DAGs are optimized when the list is set
+   - Safe fallback when Airflow context is unavailable
 
 5. **Cleanup (optional):**
    To remove the test environment (venv and airflow_home directories):

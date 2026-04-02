@@ -97,6 +97,24 @@ def patch_bigquery_hook():
                     )
                     return original_insert_job(self, configuration=configuration, **kwargs)
 
+                dag_whitelist = config.get("dag_whitelist")
+                if dag_whitelist:
+                    try:
+                        from airflow.operators.python import get_current_context
+
+                        context = get_current_context()
+                        dag_id = context["dag"].dag_id
+                    except Exception:
+                        dag_id = None
+
+                    if dag_id and dag_id not in dag_whitelist:
+                        logging.debug(
+                            "Rabbit BQ Optimizer: DAG '%s' is not in dag_whitelist. "
+                            "Skipping optimization.",
+                            dag_id,
+                        )
+                        return original_insert_job(self, configuration=configuration, **kwargs)
+
                 logging.debug("Rabbit BQ Optimizer: Original job configuration: %s", configuration)
 
                 try:
