@@ -107,7 +107,15 @@ def patch_bigquery_hook():
                     except Exception:
                         dag_id = None
 
-                    if dag_id and dag_id not in dag_whitelist:
+                    if dag_id is None:
+                        logging.warning(
+                            "Rabbit BQ Optimizer: dag_whitelist is set but the current "
+                            "DAG could not be determined. Proceeding with original job "
+                            "configuration."
+                        )
+                        return original_insert_job(self, configuration=configuration, **kwargs)
+
+                    if dag_id not in dag_whitelist:
                         logging.debug(
                             "Rabbit BQ Optimizer: DAG '%s' is not in dag_whitelist. "
                             "Skipping optimization.",

@@ -7,7 +7,7 @@ Scenarios covered:
   2. Empty dag_whitelist → all DAGs optimized
   3. DAG in whitelist → optimized
   4. DAG not in whitelist → skipped
-  5. get_current_context unavailable → optimized (safe fallback)
+  5. get_current_context unavailable with whitelist set → skipped (safe fallback)
 """
 
 import os
@@ -161,8 +161,8 @@ def test_dag_not_in_whitelist_skipped():
         return False
 
 
-def test_context_unavailable_falls_through():
-    """If get_current_context fails, optimization should proceed (safe fallback)."""
+def test_context_unavailable_skips_when_whitelist_set():
+    """If dag_whitelist is set but get_current_context fails, optimization should be skipped."""
     config = {**VALID_CONFIG_BASE, "dag_whitelist": ["some_dag"]}
 
     with patch(
@@ -171,13 +171,13 @@ def test_context_unavailable_falls_through():
     ):
         optimized = _run_insert_job(config)
 
-    if optimized:
-        print("✓ Context unavailable → optimization ran (safe fallback)")
+    if not optimized:
+        print("✓ Context unavailable with whitelist → optimization skipped (safe fallback)")
         return True
     else:
         print(
-            "✗ Context unavailable → expected optimization to run as fallback, "
-            "but it was skipped"
+            "✗ Context unavailable with whitelist → expected optimization to be skipped, "
+            "but it ran"
         )
         return False
 
@@ -192,7 +192,7 @@ if __name__ == "__main__":
         test_empty_whitelist_optimizes_all,
         test_dag_in_whitelist_optimized,
         test_dag_not_in_whitelist_skipped,
-        test_context_unavailable_falls_through,
+        test_context_unavailable_skips_when_whitelist_set,
     ]
 
     results = []

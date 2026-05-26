@@ -182,7 +182,7 @@ A setup script `setup_local_test.sh` is provided in the root directory to help y
    This verifies the optional `dag_whitelist` feature:
    - Optimization runs for all DAGs when whitelist is absent or empty
    - Only whitelisted DAGs are optimized when the list is set
-   - Safe fallback when Airflow context is unavailable
+   - Safe fallback (skips optimization) when whitelist is set but Airflow context is unavailable
 
 5. **Cleanup (optional):**
    To remove the test environment (venv and airflow_home directories):
