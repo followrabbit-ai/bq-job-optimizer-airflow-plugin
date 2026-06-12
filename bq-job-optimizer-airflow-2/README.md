@@ -78,7 +78,7 @@ The remaining optimizer configuration stays in an Airflow variable. Create a JSO
 
 - `default_pricing_mode` (required): The default pricing mode for jobs. Must be one of: `"on_demand"` or `"slot_based"`
 - `reservation_ids` (required): List of reservation IDs in the format "project:region.reservation-name"
-- `dag_whitelist` (optional): List of DAG IDs to optimize. When omitted or empty, all DAGs are optimized. When specified, only BigQuery jobs from matching DAGs are optimized; all others pass through unmodified.
+- `dag_whitelist` (optional): List of DAG IDs to optimize. When omitted or empty, all DAGs are optimized. When specified, only BigQuery jobs from matching DAGs are optimized; all others pass through unmodified. Must be a JSON list; any other type is ignored and optimization is skipped as a safe fallback.
 
 ### Setting the Configuration
 

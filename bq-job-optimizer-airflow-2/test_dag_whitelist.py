@@ -8,6 +8,7 @@ Scenarios covered:
   3. DAG in whitelist → optimized
   4. DAG not in whitelist → skipped
   5. get_current_context unavailable with whitelist set → skipped (safe fallback)
+  6. dag_whitelist with wrong type → optimization skipped (safe fallback)
 """
 
 import os
@@ -44,19 +45,20 @@ def _reset_patch():
         delattr(BigQueryHook, "_rabbit_bq_job_optimizer_patched")
 
 
-def _run_insert_job(config, context_side_effect=None):
+def _run_insert_job(config):
     """
     Apply a fresh patch and call insert_job once.
 
-    Returns (optimize_job_called: bool, original_called_with_original: bool).
+    Returns optimize_job_called: bool. Tests that need a specific Airflow
+    context patch ``airflow.operators.python.get_current_context`` themselves
+    before calling this helper, since the plugin imports it locally inside
+    ``insert_job``.
     """
     _reset_patch()
 
     original_config = {"query": {"query": "SELECT 1", "useLegacySql": False}}
-    original_called_configs = []
 
     def mock_original(self, *, configuration, **kwargs):
-        original_called_configs.append(configuration)
         job = MagicMock(spec=BigQueryJob)
         job.job_id = "test-job-123"
         return job
@@ -70,35 +72,21 @@ def _run_insert_job(config, context_side_effect=None):
     mock_client = MagicMock()
     mock_client.optimize_job.return_value = _make_mock_optimizer_response()
 
-    patches = {
-        "rabbit_bq_optimizer_plugin.Variable.get": MagicMock(return_value=config),
-        "rabbit_bq_optimizer_plugin.BaseHook.get_connection": MagicMock(
-            return_value=DUMMY_CONNECTION
-        ),
-        "rabbit_bq_optimizer_plugin.RabbitBQJobOptimizer": MagicMock(return_value=mock_client),
-    }
-
-    if context_side_effect is not None:
-        patches["rabbit_bq_optimizer_plugin.get_current_context"] = context_side_effect
-
     with (
-        patch.dict("sys.modules", {}),
-        patch(list(patches.keys())[0], patches[list(patches.keys())[0]]),
-        patch(list(patches.keys())[1], patches[list(patches.keys())[1]]),
-        patch(list(patches.keys())[2], patches[list(patches.keys())[2]]),
+        patch("rabbit_bq_optimizer_plugin.Variable.get", return_value=config),
+        patch(
+            "rabbit_bq_optimizer_plugin.BaseHook.get_connection",
+            return_value=DUMMY_CONNECTION,
+        ),
+        patch(
+            "rabbit_bq_optimizer_plugin.RabbitBQJobOptimizer",
+            return_value=mock_client,
+        ),
     ):
+        hook = BigQueryHook()
+        hook.insert_job(configuration=original_config)
 
-        if len(patches) == 4:
-            ctx_key = list(patches.keys())[3]
-            with patch(ctx_key, patches[ctx_key]):
-                hook = BigQueryHook()
-                hook.insert_job(configuration=original_config)
-        else:
-            hook = BigQueryHook()
-            hook.insert_job(configuration=original_config)
-
-    optimized = mock_client.optimize_job.called
-    return optimized
+    return mock_client.optimize_job.called
 
 
 def test_no_whitelist_optimizes_all():
@@ -182,6 +170,19 @@ def test_context_unavailable_skips_when_whitelist_set():
         return False
 
 
+def test_invalid_whitelist_type_skips_optimization():
+    """A dag_whitelist that is not a list should skip optimization (safe fallback)."""
+    config = {**VALID_CONFIG_BASE, "dag_whitelist": "my_dag"}
+    optimized = _run_insert_job(config)
+
+    if not optimized:
+        print("✓ Non-list dag_whitelist → optimization skipped (safe fallback)")
+        return True
+    else:
+        print("✗ Non-list dag_whitelist → expected optimization to be skipped, but it ran")
+        return False
+
+
 if __name__ == "__main__":
     print("=" * 70)
     print("Rabbit BQ Optimizer Plugin — DAG Whitelist Tests")
@@ -193,6 +194,7 @@ if __name__ == "__main__":
         test_dag_in_whitelist_optimized,
         test_dag_not_in_whitelist_skipped,
         test_context_unavailable_skips_when_whitelist_set,
+        test_invalid_whitelist_type_skips_optimization,
     ]
 
     results = []
