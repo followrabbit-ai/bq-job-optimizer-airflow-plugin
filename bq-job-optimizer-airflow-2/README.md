@@ -6,6 +6,7 @@ This Airflow plugin automatically optimizes BigQuery job configurations using th
 
 - Automatically intercepts all BigQuery job submissions
 - Optimizes job configurations via the Rabbit API
+- Routes `BigQueryInsertJobOperator` submits to an on-demand pool billing project when the optimizer sets `optimizedJob.jobReference.projectId`
 - Graceful fallback to original configuration if optimization fails
 - Comprehensive error handling and logging
 
@@ -139,7 +140,7 @@ A setup script `setup_local_test.sh` is provided in the root directory to help y
 3. **Verify Results:**
    Check the logs for the following:
    - `Rabbit BQ Optimizer: Client initialized successfully`
-   - `Rabbit BQ Optimizer: Received optimization result` (or failure if using dummy key/URL)
+   - `Rabbit BQ Optimizer: optimization result=...` at DEBUG (or failure if using dummy key/URL)
 
 4. **Run automated tests:**
    After setup, you can run automated tests to validate the plugin:
@@ -164,6 +165,13 @@ A setup script `setup_local_test.sh` is provided in the root directory to help y
    - The plugin intercepts BigQuery jobs
    - The Rabbit optimization API is called with connection credentials
    - The optimized configuration is used
+
+   **Test plugin optimization (unit, no real BQ):**
+   ```bash
+   source venv/bin/activate
+   export AIRFLOW_HOME=$(pwd)/airflow_home
+   python -m unittest bq-job-optimizer-airflow-2/test_plugin_optimization.py -v
+   ```
 
 5. **Cleanup (optional):**
    To remove the test environment (venv and airflow_home directories):
@@ -192,7 +200,7 @@ A setup script `setup_local_test.sh` is provided in the root directory to help y
 
 4. **Positive path (connection + variable present)**
    - Confirm in the scheduler logs that the plugin logs `Client initialized successfully`.
-   - Validate that the BigQuery job request reaches Rabbit (check Rabbit logs or look for the `Rabbit BQ Optimizer: Received optimization result` log line).
+   - Validate that the BigQuery job request reaches Rabbit (check Rabbit logs or enable DEBUG for `Rabbit BQ Optimizer: optimization result=...`).
    - For a query with historical data/reservations, verify the resulting BigQuery job uses the optimized configuration.
 
 5. **Missing connection safety net**
@@ -225,6 +233,34 @@ insert_job = BigQueryInsertJobOperator(
     }
 )
 ```
+
+### Pool billing project routing
+
+When the optimizer returns a pool billing project in
+`optimizedJob.jobReference.projectId`, jobs submitted through
+`BigQueryInsertJobOperator` run and poll on that project. The plugin briefly
+links the operator to the hook during `_submit_job` so `operator.project_id`
+and the BigQuery `jobs.insert` call use the same billing project.
+
+Direct `BigQueryHook.insert_job` calls still receive the optimized
+configuration but keep the original `project_id`. Use
+`BigQueryInsertJobOperator` in DAGs when you need pool billing project
+routing with deferrable tasks.
+
+If the optimizer response has no `jobReference.projectId` (for example
+reservation-only assignment), the operator keeps its configured source
+`project_id`.
+
+### Job labels
+
+Optimized jobs include labels you can query in BigQuery
+(`INFORMATION_SCHEMA.JOBS_BY_*`) to confirm how each submit was handled:
+
+| Label | Values | Meaning |
+|-------|--------|---------|
+| `rabbit-source-project` | GCP project id | Project the job was submitted from (your DAG / operator `project_id`) |
+| `rabbit-pool-project` | GCP project id | Pool billing project recommended by the optimizer (present only when a pool was assigned) |
+| `rabbit-pool-routing` | `applied` \| `skipped` \| `none` | `applied`: `BigQueryInsertJobOperator` submitted on `rabbit-pool-project`; `skipped`: pool recommended but submit stayed on the source project (typically a direct hook call); `none`: no pool billing project in the optimizer response |
 
 ## Error Handling
 

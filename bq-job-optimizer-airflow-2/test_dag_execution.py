@@ -6,6 +6,7 @@ BigQuery jobs and calls the Rabbit optimization API with connection credentials.
 
 import os
 import sys
+from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 # Set up Airflow environment
@@ -83,13 +84,13 @@ def test_dag_execution_with_optimizer():
     # Load and patch the plugin (this will save our mock as the "original")
     print("\n4. Loading and patching plugin...")
     try:
-        from rabbit_bq_optimizer_plugin import patch_bigquery_hook
+        from rabbit_bq_optimizer_plugin import RABBIT_HOOK_PATCHED_MARKER, patch_bigquery_hook
 
         patch_bigquery_hook()
         print("✓ Plugin patch applied")
 
         # Verify patch marker
-        if hasattr(BigQueryHook, "_rabbit_bq_job_optimizer_patched"):
+        if hasattr(BigQueryHook, RABBIT_HOOK_PATCHED_MARKER):
             print("✓ Patch marker confirmed")
         else:
             print("✗ Patch marker not found")
@@ -103,13 +104,15 @@ def test_dag_execution_with_optimizer():
 
     # Mock the RabbitBQJobOptimizer client
     print("\n5. Setting up mock Rabbit API client...")
-    mock_optimization_response = MagicMock()
-    mock_optimization_response.optimizedJob = {
-        "configuration": {"query": {"query": "SELECT 1 AS test", "useLegacySql": False}}
-    }
-    mock_optimization_response.optimizationResults = []
-    mock_optimization_response.estimatedSavings = 0.0
-    mock_optimization_response.optimizationPerformed = False
+    mock_optimization_response = SimpleNamespace(
+        optimizedJob={
+            "configuration": {"query": {"query": "SELECT 1 AS test", "useLegacySql": False}},
+            "jobReference": {"projectId": "test-billing-project"},
+        },
+        optimizationResults=[],
+        estimatedSavings=0.0,
+        optimizationPerformed=False,
+    )
 
     mock_client = MagicMock()
     mock_client.optimize_job.return_value = mock_optimization_response
@@ -117,14 +120,21 @@ def test_dag_execution_with_optimizer():
     # Simulate DAG execution
     print("\n6. Simulating DAG execution (calling insert_job)...")
     try:
-        hook = BigQueryHook()
-
         test_job_config = {"query": {"query": "SELECT 1 AS test", "useLegacySql": False}}
 
         # Patch RabbitBQJobOptimizer to use our mock
-        with patch("rabbit_bq_optimizer_plugin.RabbitBQJobOptimizer", return_value=mock_client):
-            # Call the patched insert_job
-            result = hook.insert_job(configuration=test_job_config)
+        with (
+            patch(
+                "airflow.hooks.base.BaseHook.get_connection",
+                return_value=MagicMock(extra_dejson={"project": "test-source-project"}),
+            ),
+            patch("rabbit_bq_optimizer_plugin.RabbitBQJobOptimizer", return_value=mock_client),
+        ):
+            hook = BigQueryHook(gcp_conn_id="google_cloud_default")
+            result = hook.insert_job(
+                configuration=test_job_config,
+                project_id="test-source-project",
+            )
 
             print(f"  → insert_job returned: {type(result).__name__}")
 
