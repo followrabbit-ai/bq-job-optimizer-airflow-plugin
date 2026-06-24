@@ -10,6 +10,8 @@ This Airflow plugin automatically optimizes BigQuery job configurations using th
 - Graceful fallback to original configuration if optimization fails
 - Comprehensive error handling and logging
 
+Already running an older version? See [UPDATE.md](UPDATE.md).
+
 ## Installation
 
 1. Add the dependency to your Airflow environment:
@@ -33,7 +35,7 @@ This Airflow plugin automatically optimizes BigQuery job configurations using th
 cp rabbit_bq_optimizer_plugin.py $AIRFLOW_HOME/plugins/
 ```
 
-3. Restart your Airflow webserver, scheduler, and workers to load the plugin.
+3. Restart your Airflow scheduler, workers, and webserver to load the plugin. If you use deferrable `BigQueryInsertJobOperator`, restart the triggerer as well.
 
 ## Configuration
 
@@ -139,8 +141,9 @@ A setup script `setup_local_test.sh` is provided in the root directory to help y
 
 3. **Verify Results:**
    Check the logs for the following:
-   - `Rabbit BQ Optimizer: Client initialized successfully`
-   - `Rabbit BQ Optimizer: optimization result=...` at DEBUG (or failure if using dummy key/URL)
+   - `Rabbit BQ Optimizer: patching BigQueryHook.insert_job` (scheduler logs at startup)
+   - `Rabbit BQ Optimizer: patching BigQueryInsertJobOperator._submit_job` (scheduler logs at startup)
+   - `Rabbit BQ Optimizer: optimization result=...` at DEBUG on job submit (or failure if using dummy key/URL)
 
 4. **Run automated tests:**
    After setup, you can run automated tests to validate the plugin:
@@ -199,7 +202,7 @@ A setup script `setup_local_test.sh` is provided in the root directory to help y
    - Trigger a DAG that uses `BigQueryInsertJobOperator` (or any BigQuery operator).
 
 4. **Positive path (connection + variable present)**
-   - Confirm in the scheduler logs that the plugin logs `Client initialized successfully`.
+   - Confirm in the scheduler logs at startup that the plugin logs `patching BigQueryHook.insert_job` and `patching BigQueryInsertJobOperator._submit_job`.
    - Validate that the BigQuery job request reaches Rabbit (check Rabbit logs or enable DEBUG for `Rabbit BQ Optimizer: optimization result=...`).
    - For a query with historical data/reservations, verify the resulting BigQuery job uses the optimized configuration.
 
@@ -281,7 +284,7 @@ Broken plugin: [/home/airflow/gcs/plugins/rabbit_bq_optimizer_plugin.py] No modu
 If you see this error, it means the rabbit-bq-job-optimizer package is missing from your Airflow environment. Install it by adding the package (https://pypi.org/project/rabbit-bq-job-optimizer/) to your Airflow requirements or environment.
 
 ```
-[2025-06-15, 17:25:20 UTC] {rabbit_bq_optimizer_plugin.py:26} WARNING - Rabbit BQ Optimizer: Configuration error: 'Variable rabbit_bq_optimizer_config does not exist'. Proceeding with original job configuration.
+[2025-06-15, 17:25:20 UTC] {rabbit_bq_optimizer_plugin.py:82} WARNING - Rabbit BQ Optimizer: config error: 'Variable rabbit_bq_optimizer_config does not exist'. Using original job.
 ```
 
 If you see this error, it means the Airflow variable `rabbit_bq_optimizer_config` is not set or has invalid content. Make sure you have:
