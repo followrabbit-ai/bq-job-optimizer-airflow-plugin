@@ -10,7 +10,7 @@ This Airflow plugin automatically optimizes BigQuery job configurations using th
 - Graceful fallback to original configuration if optimization fails
 - Comprehensive error handling and logging
 
-Already running an older version? See [UPDATE.md](UPDATE.md).
+Already running an older version? See [Updating](#updating).
 
 ## Installation
 
@@ -36,6 +36,18 @@ cp rabbit_bq_optimizer_plugin.py $AIRFLOW_HOME/plugins/
 ```
 
 3. Restart your Airflow scheduler, workers, and webserver to load the plugin. If you use deferrable `BigQueryInsertJobOperator`, restart the triggerer as well.
+
+## Updating
+
+Already running an older version (and want pool billing routing)? Copy the latest `rabbit_bq_optimizer_plugin.py` into your Airflow plugins directory and redeploy:
+
+```bash
+cp rabbit_bq_optimizer_plugin.py $AIRFLOW_HOME/plugins/
+```
+
+Then restart the scheduler, workers, and webserver (and the triggerer if you use deferrable `BigQueryInsertJobOperator`). Your `rabbit_api` connection, `rabbit_bq_optimizer_config` variable, and DAGs are unchanged. If optimization fails, the plugin still submits the original job (fail-open).
+
+For pool billing routing, the Airflow service account also needs `roles/bigquery.jobUser` on the pool billing projects — contact Rabbit support for your project list. See [Pool billing project routing](#pool-billing-project-routing).
 
 ## Configuration
 

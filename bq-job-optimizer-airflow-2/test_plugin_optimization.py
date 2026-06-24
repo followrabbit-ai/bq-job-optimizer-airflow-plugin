@@ -6,6 +6,7 @@ from __future__ import annotations
 import os
 import sys
 import unittest
+from contextlib import contextmanager
 from datetime import datetime
 from unittest.mock import MagicMock, patch
 
@@ -48,10 +49,11 @@ class TestPluginOptimization(unittest.TestCase):
             optimizationPerformed=True,
         )
 
+    @contextmanager
     def _patch_plugin(self, plugin_module, *, mock_client):
         from airflow.models import Variable
 
-        return (
+        with (
             patch.object(
                 Variable,
                 "get",
@@ -63,7 +65,8 @@ class TestPluginOptimization(unittest.TestCase):
                 return_value={"api_key": "k", "base_url": None},
             ),
             patch.object(plugin_module, "RabbitBQJobOptimizer", return_value=mock_client),
-        )
+        ):
+            yield
 
     def test_direct_hook_insert_keeps_source_project_id(self):
         import importlib
@@ -87,7 +90,7 @@ class TestPluginOptimization(unittest.TestCase):
             pool_project=POOL_BILLING_PROJECT
         )
 
-        with (*self._patch_plugin(plugin_module, mock_client=mock_client),):
+        with self._patch_plugin(plugin_module, mock_client=mock_client):
             plugin_module.patch_bigquery_hook()
             plugin_module.patch_bigquery_insert_job_operator()
 
@@ -152,7 +155,7 @@ class TestPluginOptimization(unittest.TestCase):
             dag=dag,
         )
 
-        with (*self._patch_plugin(plugin_module, mock_client=mock_client),):
+        with self._patch_plugin(plugin_module, mock_client=mock_client):
             plugin_module.patch_bigquery_hook()
             plugin_module.patch_bigquery_insert_job_operator()
             op.execute(context={"logical_date": datetime(2026, 1, 1), "ti": MagicMock()})
@@ -167,6 +170,69 @@ class TestPluginOptimization(unittest.TestCase):
         labels = submitted["configuration"].get("labels", {})
         self.assertEqual(labels.get("rabbit-pool-project"), POOL_BILLING_PROJECT)
         self.assertEqual(labels.get("rabbit-pool-routing"), "applied")
+
+    def test_operator_failopen_restores_source_project(self):
+        """If the pool submit fails, fail-open must reset operator.project_id to the source."""
+        import importlib
+
+        import rabbit_bq_optimizer_plugin as plugin_module
+        from airflow import DAG
+        from airflow.providers.google.cloud.hooks.bigquery import BigQueryHook
+        from airflow.providers.google.cloud.operators.bigquery import BigQueryInsertJobOperator
+
+        importlib.reload(plugin_module)
+
+        submitted: dict = {}
+        calls = {"n": 0}
+
+        def fake_bq_submit(self, *, configuration, **kwargs):
+            calls["n"] += 1
+            if calls["n"] == 1:
+                # First (optimized/pool) submit fails → plugin must fail open.
+                raise RuntimeError("pool submit denied")
+            submitted["configuration"] = configuration
+            submitted["kwargs"] = dict(kwargs)
+            job = MagicMock()
+            job.job_id = "mock-op-job-failopen"
+            job.running.return_value = False
+            job.state = "DONE"
+            job.error_result = None
+            job.errors = []
+            job.result.return_value = None
+            job.to_api_repr.return_value = {"configuration": {}}
+            return job
+
+        BigQueryHook.insert_job = fake_bq_submit
+
+        mock_client = MagicMock()
+        mock_client.optimize_job.return_value = self._mock_optimizer_response(
+            pool_project=POOL_BILLING_PROJECT
+        )
+
+        original_config = {"query": {"query": "SELECT 1", "useLegacySql": False}}
+        dag = DAG("plugin_optimization_failopen", start_date=datetime(2026, 1, 1), schedule=None)
+        op = BigQueryInsertJobOperator(
+            task_id="run_query",
+            configuration=dict(original_config),
+            project_id=SOURCE_PROJECT,
+            location="US",
+            deferrable=False,
+            dag=dag,
+        )
+
+        with self._patch_plugin(plugin_module, mock_client=mock_client):
+            plugin_module.patch_bigquery_hook()
+            plugin_module.patch_bigquery_insert_job_operator()
+            op.execute(context={"logical_date": datetime(2026, 1, 1), "ti": MagicMock()})
+
+        # Job actually landed on the source project; operator must agree so poll/defer match.
+        self.assertEqual(submitted["kwargs"]["project_id"], SOURCE_PROJECT)
+        self.assertEqual(op.project_id, SOURCE_PROJECT)
+        # Fail-open must drop the optimized config (and its rabbit-pool routing labels).
+        submitted_labels = submitted["configuration"].get("labels", {})
+        self.assertFalse([k for k in submitted_labels if k.startswith("rabbit-")])
+        op_labels = (op.configuration or {}).get("labels", {})
+        self.assertFalse([k for k in op_labels if k.startswith("rabbit-")])
 
     def test_operator_without_job_reference_keeps_source_project(self):
         """Reservation-only optimization must not rewrite operator.project_id."""
@@ -209,7 +275,7 @@ class TestPluginOptimization(unittest.TestCase):
             dag=dag,
         )
 
-        with (*self._patch_plugin(plugin_module, mock_client=mock_client),):
+        with self._patch_plugin(plugin_module, mock_client=mock_client):
             plugin_module.patch_bigquery_hook()
             plugin_module.patch_bigquery_insert_job_operator()
             op.execute(context={"logical_date": datetime(2026, 1, 1), "ti": MagicMock()})
@@ -283,7 +349,7 @@ class TestPluginOptimization(unittest.TestCase):
         mock_client = MagicMock()
         mock_client.optimize_job.side_effect = RuntimeError("optimizer down")
 
-        with (*self._patch_plugin(plugin_module, mock_client=mock_client),):
+        with self._patch_plugin(plugin_module, mock_client=mock_client):
             plugin_module.patch_bigquery_hook()
 
             hook = BigQueryHook(gcp_conn_id="google_cloud_default")

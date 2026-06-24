@@ -142,7 +142,7 @@ def _optimize(
 
     logging.debug("Rabbit BQ Optimizer: optimization result=%s", result)
 
-    optimized = dict(result.optimizedJob.get("configuration") or {})
+    optimized = dict((result.optimizedJob or {}).get("configuration") or {})
     if source_project:
         labels = dict(optimized.get("labels") or {})
         labels.setdefault(SOURCE_PROJECT_LABEL, source_project)
@@ -218,6 +218,8 @@ def patch_bigquery_hook() -> None:
             operator_bridge_active=operator is not None,
         )
         submit_kwargs = dict(kwargs)
+        original_operator_config = operator.configuration if operator is not None else None
+        original_operator_project = operator.project_id if operator is not None else None
         if operator is not None:
             operator.configuration = optimized
             if pool_billing_project:
@@ -230,6 +232,10 @@ def patch_bigquery_hook() -> None:
             logging.warning(
                 "Rabbit BQ Optimizer: optimized submit failed: %s. Using original job.", exc
             )
+            # Restore operator state so poll/defer track the source project, not the pool.
+            if operator is not None:
+                operator.configuration = original_operator_config
+                operator.project_id = original_operator_project
             return original_insert_job(self, configuration=configuration, **kwargs)
 
     BigQueryHook.insert_job = patched_insert_job
