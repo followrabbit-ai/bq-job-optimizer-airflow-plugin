@@ -86,6 +86,27 @@ def test_missing_base_url_uses_default():
         return False
 
 
+def test_missing_connection_raises_runtime_error():
+    """Plugin should surface a clear RuntimeError when rabbit_api is missing."""
+    print("\nTesting missing connection handling...")
+
+    with patch(
+        "rabbit_bq_optimizer_plugin.BaseHook.get_connection",
+        side_effect=AirflowException("Connection not found"),
+    ):
+        try:
+            _load_rabbit_credentials()
+        except RuntimeError as exc:
+            if "could not be loaded" in str(exc):
+                print("✓ Missing connection raises RuntimeError")
+                return True
+            print(f"✗ Unexpected RuntimeError message: {exc}")
+            return False
+
+    print("✗ Expected RuntimeError for missing connection")
+    return False
+
+
 if __name__ == "__main__":
     print("=" * 60)
     print("Rabbit BQ Optimizer Plugin Connection Test")
@@ -104,6 +125,9 @@ if __name__ == "__main__":
         all_tests_passed = False
 
     if not test_missing_base_url_uses_default():
+        all_tests_passed = False
+
+    if not test_missing_connection_raises_runtime_error():
         all_tests_passed = False
 
     print("\n" + "=" * 60)
