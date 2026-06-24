@@ -221,6 +221,48 @@ class TestPluginOptimization(unittest.TestCase):
         self.assertNotIn("rabbit-pool-project", labels)
         mock_client.optimize_job.assert_called_once()
 
+    def test_missing_reservation_ids_calls_optimizer_with_empty_list(self):
+        import importlib
+
+        import rabbit_bq_optimizer_plugin as plugin_module
+        from airflow.models import Variable
+        from airflow.providers.google.cloud.hooks.bigquery import BigQueryHook
+
+        importlib.reload(plugin_module)
+
+        def fake_bq_submit(self, *, configuration, **kwargs):
+            return MagicMock(job_id="mock-job-empty-res")
+
+        BigQueryHook.insert_job = fake_bq_submit
+
+        mock_client = MagicMock()
+        mock_client.optimize_job.return_value = self._mock_optimizer_response(pool_project=None)
+
+        with (
+            patch.object(
+                Variable,
+                "get",
+                return_value={"default_pricing_mode": "on_demand"},
+            ),
+            patch.object(
+                plugin_module,
+                "_load_rabbit_credentials",
+                return_value={"api_key": "k", "base_url": None},
+            ),
+            patch.object(plugin_module, "RabbitBQJobOptimizer", return_value=mock_client),
+        ):
+            plugin_module.patch_bigquery_hook()
+
+            hook = BigQueryHook(gcp_conn_id="google_cloud_default")
+            hook.insert_job(
+                configuration={"query": {"query": "SELECT 1", "useLegacySql": False}},
+                project_id=SOURCE_PROJECT,
+            )
+
+        mock_client.optimize_job.assert_called_once()
+        optimization_config = mock_client.optimize_job.call_args.kwargs["enabledOptimizations"][0]
+        self.assertEqual(optimization_config.config["reservationIds"], [])
+
     def test_optimize_failure_fails_open(self):
         import importlib
 

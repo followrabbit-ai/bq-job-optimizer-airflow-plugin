@@ -82,19 +82,16 @@ def _load_optimizer_config() -> dict[str, Any] | None:
         logging.warning("Rabbit BQ Optimizer: config error: %s. Using original job.", exc)
         return None
 
-    for field in ("reservation_ids", "default_pricing_mode"):
-        if field not in config:
-            logging.warning("Rabbit BQ Optimizer: missing %s. Using original job.", field)
-            return None
+    if "default_pricing_mode" not in config:
+        logging.warning("Rabbit BQ Optimizer: missing default_pricing_mode. Using original job.")
+        return None
 
     if config["default_pricing_mode"] not in ("on_demand", "slot_based"):
         logging.warning("Rabbit BQ Optimizer: bad default_pricing_mode. Using original job.")
         return None
 
-    if not config["reservation_ids"]:
-        logging.warning("Rabbit BQ Optimizer: no reservation_ids. Using original job.")
-        return None
-
+    config = dict(config)
+    config["reservation_ids"] = config.get("reservation_ids") or []
     return config
 
 
