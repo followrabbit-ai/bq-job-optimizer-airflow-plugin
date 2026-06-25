@@ -14,20 +14,27 @@ Already running an older version? See [Updating](#updating).
 
 ## Installation
 
-Choose **one** of the following — do not use both in the same Airflow environment (duplicate plugin loading).
-
 ### Option A: PyPI (recommended)
 
-1. Add both packages to your Airflow environment dependencies (for example `requirements.txt`, Composer PyPI packages, or a custom image build):
-
-   ```txt
-   rabbit-bq-job-optimizer==0.1.18
-   rabbit-bq-optimizer-airflow-plugin==1.0.0
-   ```
+1. Add the plugin and client to your Airflow environment:
+   - If using `requirements.txt`:
+     ```txt
+     rabbit-bq-job-optimizer==0.1.18
+     rabbit-bq-optimizer-airflow-plugin==1.0.0
+     ```
+   - If using `constraints.txt`:
+     ```txt
+     rabbit-bq-job-optimizer==0.1.18
+     rabbit-bq-optimizer-airflow-plugin==1.0.0
+     ```
+   - If using a custom Docker image, add to your Dockerfile:
+     ```dockerfile
+     RUN pip install rabbit-bq-job-optimizer==0.1.18 rabbit-bq-optimizer-airflow-plugin==1.0.0
+     ```
 
    The plugin registers via Airflow's plugin entry point — no file copy into `plugins/` is required.
 
-2. Apply the dependency update using your platform's usual process, then restart Airflow components so the plugin loads (scheduler, workers, webserver, and triggerer if you use deferrable `BigQueryInsertJobOperator`).
+2. Restart your Airflow scheduler, workers, and webserver to load the plugin. If you use deferrable `BigQueryInsertJobOperator`, restart the triggerer as well.
 
 ### Option B: Copy into `plugins/`
 
@@ -37,9 +44,12 @@ Choose **one** of the following — do not use both in the same Airflow environm
    rabbit-bq-job-optimizer==0.1.18
    ```
 
-2. Deploy `rabbit_bq_optimizer_plugin.py` from this repo to your environment's Airflow plugins location.
+2. Copy the plugin file into your Airflow plugins directory:
+   ```bash
+   cp bq-job-optimizer-airflow-2/rabbit_bq_optimizer_plugin.py "$AIRFLOW_HOME/plugins/"
+   ```
 
-3. Apply the dependency update and plugin deploy using your platform's usual process, then restart Airflow components (including the triggerer if you use deferrable operators).
+3. Restart your Airflow scheduler, workers, and webserver (and triggerer if using deferrable operators).
 
 ## Updating
 
