@@ -378,7 +378,7 @@ The hooks will automatically:
 
 GitHub Actions automatically runs on every push and pull request:
 - **Linting and Formatting**: Checks code style with Black and Ruff
-- **Tests**: Runs test suite on Python 3.10, 3.11, and 3.12
+- **Tests**: Runs test suite on Python 3.9, 3.10, 3.11, and 3.12
 
 ## Uninstalling
 

@@ -20,7 +20,7 @@ setup(
         "Operating System :: OS Independent",
         "Framework :: Apache Airflow",
     ],
-    python_requires=">=3.10",
+    python_requires=">=3.8",
     entry_points={
         "airflow.plugins": [
             "rabbit_bq_job_optimizer_plugin = "
