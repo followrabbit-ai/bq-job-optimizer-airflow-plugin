@@ -6,7 +6,7 @@ setup(
     py_modules=["rabbit_bq_optimizer_plugin"],
     package_dir={"": "bq-job-optimizer-airflow-2"},
     install_requires=[
-        "rabbit-bq-job-optimizer>=0.1.17",
+        "rabbit-bq-job-optimizer>=0.1.18",
     ],
     author="Rabbit Team",
     author_email="success@followrabbit.ai",
