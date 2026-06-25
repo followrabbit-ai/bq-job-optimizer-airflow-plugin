@@ -91,7 +91,13 @@ def _load_optimizer_config() -> dict[str, Any] | None:
         return None
 
     config = dict(config)
-    config["reservation_ids"] = config.get("reservation_ids") or []
+    reservation_ids = config.get("reservation_ids") or []
+    if config["default_pricing_mode"] == "on_demand" and not reservation_ids:
+        logging.warning(
+            "Rabbit BQ Optimizer: on_demand default with no reservation_ids. " "Using original job."
+        )
+        return None
+    config["reservation_ids"] = reservation_ids
     return config
 
 
@@ -123,19 +129,23 @@ def _optimize(
         client_kwargs["base_url"] = credentials["base_url"]
     client = RabbitBQJobOptimizer(**client_kwargs)
 
+    optimize_kwargs: dict[str, Any] = {
+        "configuration": {"configuration": configuration},
+        "enabledOptimizations": [
+            OptimizationConfig(
+                type="reservation_assignment",
+                config={
+                    "defaultPricingMode": config.get("default_pricing_mode"),
+                    "reservationIds": config["reservation_ids"],
+                },
+            )
+        ],
+    }
+    if source_project:
+        optimize_kwargs["project_id"] = source_project
+
     try:
-        result = client.optimize_job(
-            configuration={"configuration": configuration},
-            enabledOptimizations=[
-                OptimizationConfig(
-                    type="reservation_assignment",
-                    config={
-                        "defaultPricingMode": config.get("default_pricing_mode"),
-                        "reservationIds": config["reservation_ids"],
-                    },
-                )
-            ],
-        )
+        result = client.optimize_job(**optimize_kwargs)
     except Exception as exc:
         logging.warning("Rabbit BQ Optimizer: optimize_job failed: %s. Using original job.", exc)
         return None
@@ -241,9 +251,54 @@ def patch_bigquery_hook() -> None:
     BigQueryHook.insert_job = patched_insert_job
 
 
+LEGACY_PLUGIN_FILENAME = "rabbit_bq_optimizer_plugin.py"
+
+
+def _warn_or_remove_legacy_plugin_file() -> None:
+    """Drop the pre-PyPI copy-to-plugins deploy file when upgrading."""
+    airflow_home = os.environ.get("AIRFLOW_HOME")
+    if not airflow_home:
+        return
+
+    legacy = os.path.join(airflow_home, "plugins", LEGACY_PLUGIN_FILENAME)
+    if not os.path.isfile(legacy):
+        return
+
+    msg = (
+        "Rabbit BQ Optimizer: found legacy plugin file at %s. "
+        "Remove it when using rabbit-bq-optimizer-airflow-plugin from PyPI "
+        "to avoid duplicate plugin loading."
+    )
+    auto_remove = os.environ.get("RABBIT_BQ_OPTIMIZER_REMOVE_LEGACY_PLUGIN", "").lower() in (
+        "1",
+        "true",
+        "yes",
+    )
+    if auto_remove:
+        try:
+            os.remove(legacy)
+            logging.warning(
+                "Rabbit BQ Optimizer: removed legacy plugin file %s "
+                "(RABBIT_BQ_OPTIMIZER_REMOVE_LEGACY_PLUGIN enabled).",
+                legacy,
+            )
+        except OSError as exc:
+            logging.error(
+                "Rabbit BQ Optimizer: could not remove legacy plugin file %s: %s",
+                legacy,
+                exc,
+            )
+    else:
+        logging.error(
+            "%s Set env RABBIT_BQ_OPTIMIZER_REMOVE_LEGACY_PLUGIN=true to remove automatically.",
+            msg % legacy,
+        )
+
+
 class RabbitBQOptimizerPlugin(AirflowPlugin, LoggingMixin):
     name = "rabbit_bq_job_optimizer_plugin"
 
     def on_load(self, *args, **kwargs):
+        _warn_or_remove_legacy_plugin_file()
         patch_bigquery_hook()
         patch_bigquery_insert_job_operator()

@@ -102,6 +102,7 @@ pip install --constraint "${CONSTRAINT_URL}" \
     gcloud-aio-storage \
     google-cloud-secret-manager \
     google-cloud-storage
+pip install --constraint "${CONSTRAINT_URL}" -e .
 
 # Initialize Airflow DB
 if [ ! -f "$AIRFLOW_HOME/airflow.db" ]; then
@@ -118,10 +119,9 @@ if [ ! -f "$AIRFLOW_HOME/airflow.db" ]; then
         --password admin
 fi
 
-# Copy plugin and test DAG
-echo "Deploying plugin..."
-cp bq-job-optimizer-airflow-2/rabbit_bq_optimizer_plugin.py "$PLUGIN_DIR/"
-
+# Deploy test DAG (plugin loads via pip install -e . entry point)
+# For copy-paste testing instead, comment out `pip install -e .` above and run:
+#   cp bq-job-optimizer-airflow-2/rabbit_bq_optimizer_plugin.py "$PLUGIN_DIR/"
 echo "Deploying test DAG..."
 cp bq-job-optimizer-airflow-2/test_dag.py "$DAGS_DIR/"
 

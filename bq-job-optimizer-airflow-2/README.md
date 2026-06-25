@@ -14,38 +14,59 @@ Already running an older version? See [Updating](#updating).
 
 ## Installation
 
-1. Add the dependency to your Airflow environment:
+Choose **one** of the following — do not use both in the same Airflow environment (duplicate plugin loading).
+
+### Option A: PyPI (recommended)
+
+1. Install the plugin and its dependencies in your Airflow environment:
    - If using `requirements.txt`:
      ```bash
-     echo "rabbit-bq-job-optimizer" >> requirements.txt
+     echo "rabbit-bq-optimizer-airflow-plugin" >> requirements.txt
      pip install -r requirements.txt
      ```
    - If using `constraints.txt`:
      ```bash
-     echo "rabbit-bq-job-optimizer" >> constraints.txt
+     echo "rabbit-bq-optimizer-airflow-plugin" >> constraints.txt
      pip install -r constraints.txt
      ```
    - If using a custom Docker image, add to your Dockerfile:
      ```dockerfile
-     RUN pip install rabbit-bq-job-optimizer
+     RUN pip install rabbit-bq-optimizer-airflow-plugin
      ```
 
-2. Add the plugin to your Airflow plugins directory:
-```bash
-cp rabbit_bq_optimizer_plugin.py $AIRFLOW_HOME/plugins/
-```
+   This installs `rabbit-bq-job-optimizer` (Python client) automatically. The plugin registers via Airflow's plugin entry point — no file copy into `plugins/` is required.
 
-3. Restart your Airflow scheduler, workers, and webserver to load the plugin. If you use deferrable `BigQueryInsertJobOperator`, restart the triggerer as well.
+2. Restart your Airflow scheduler, workers, and webserver to load the plugin. If you use deferrable `BigQueryInsertJobOperator`, restart the triggerer as well.
+
+### Option B: Copy into `plugins/`
+
+1. Install the Python client in your Airflow environment:
+   ```bash
+   pip install rabbit-bq-job-optimizer
+   ```
+
+2. Copy the plugin file into your Airflow plugins directory:
+   ```bash
+   cp bq-job-optimizer-airflow-2/rabbit_bq_optimizer_plugin.py "$AIRFLOW_HOME/plugins/"
+   ```
+
+3. Restart your Airflow scheduler, workers, and webserver (and triggerer if using deferrable operators).
 
 ## Updating
 
-Already running an older version (and want pool billing routing)? Copy the latest `rabbit_bq_optimizer_plugin.py` into your Airflow plugins directory and redeploy:
+Upgrade the PyPI package:
 
 ```bash
-cp rabbit_bq_optimizer_plugin.py $AIRFLOW_HOME/plugins/
+pip install --upgrade rabbit-bq-optimizer-airflow-plugin
 ```
 
 Then restart the scheduler, workers, and webserver (and the triggerer if you use deferrable `BigQueryInsertJobOperator`). Your `rabbit_api` connection, `rabbit_bq_optimizer_config` variable, and DAGs are unchanged. If optimization fails, the plugin still submits the original job (fail-open).
+
+If you previously copied `rabbit_bq_optimizer_plugin.py` into `$AIRFLOW_HOME/plugins/` and are switching to the PyPI package, **remove that file** — the PyPI install loads via an entry point and the copied file causes duplicate plugin registration. On startup the plugin logs an error if both are present. To remove the copied file automatically (when writable), set:
+
+```bash
+export RABBIT_BQ_OPTIMIZER_REMOVE_LEGACY_PLUGIN=true
+```
 
 For pool billing routing, the Airflow service account also needs `roles/bigquery.jobUser` on the pool billing projects — contact Rabbit support for your project list. See [Pool billing project routing](#pool-billing-project-routing).
 
@@ -290,7 +311,7 @@ In all error cases, the plugin will log a warning and proceed with the original 
 ## Troubleshooting
 
 ```
-Broken plugin: [/home/airflow/gcs/plugins/rabbit_bq_optimizer_plugin.py] No module named 'rabbit_bq_job_optimizer'
+Broken plugin: `No module named 'rabbit_bq_job_optimizer'` — install `rabbit-bq-optimizer-airflow-plugin` (or `rabbit-bq-job-optimizer`) in the Airflow environment and restart.
 ```
 
 If you see this error, it means the rabbit-bq-job-optimizer package is missing from your Airflow environment. Install it by adding the package (https://pypi.org/project/rabbit-bq-job-optimizer/) to your Airflow requirements or environment.
@@ -342,7 +363,7 @@ The hooks will automatically:
 
 GitHub Actions automatically runs on every push and pull request:
 - **Linting and Formatting**: Checks code style with Black and Ruff
-- **Tests**: Runs test suite on Python 3.9, 3.10, 3.11, and 3.12
+- **Tests**: Runs test suite on Python 3.10, 3.11, and 3.12
 
 ## Uninstalling
 
