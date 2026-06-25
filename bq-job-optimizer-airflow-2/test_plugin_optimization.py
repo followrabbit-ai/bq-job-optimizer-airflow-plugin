@@ -4,7 +4,6 @@
 from __future__ import annotations
 
 import os
-import sys
 import unittest
 from contextlib import contextmanager
 from datetime import datetime
@@ -13,7 +12,6 @@ from unittest.mock import MagicMock, patch
 script_dir = os.path.dirname(os.path.abspath(__file__))
 repo_root = os.path.dirname(script_dir)
 os.environ.setdefault("AIRFLOW_HOME", os.path.join(repo_root, "airflow_home"))
-sys.path.insert(0, os.path.join(os.environ["AIRFLOW_HOME"], "plugins"))
 
 # Generic example GCP project IDs — no customer-specific names in public tests.
 SOURCE_PROJECT = "example-analytics-prod"
@@ -110,7 +108,7 @@ class TestPluginOptimization(unittest.TestCase):
         self.assertEqual(labels.get("rabbit-pool-project"), POOL_BILLING_PROJECT)
         self.assertEqual(labels.get("rabbit-pool-routing"), "skipped")
         payload = mock_client.optimize_job.call_args.kwargs
-        self.assertNotIn("project_id", payload)
+        self.assertEqual(payload.get("project_id"), SOURCE_PROJECT)
 
     def test_insert_job_operator_routes_billing_project(self):
         import importlib
@@ -170,6 +168,9 @@ class TestPluginOptimization(unittest.TestCase):
         labels = submitted["configuration"].get("labels", {})
         self.assertEqual(labels.get("rabbit-pool-project"), POOL_BILLING_PROJECT)
         self.assertEqual(labels.get("rabbit-pool-routing"), "applied")
+        self.assertEqual(
+            mock_client.optimize_job.call_args.kwargs.get("project_id"), SOURCE_PROJECT
+        )
 
     def test_operator_failopen_restores_source_project(self):
         """If the pool submit fails, fail-open must reset operator.project_id to the source."""
@@ -287,7 +288,51 @@ class TestPluginOptimization(unittest.TestCase):
         self.assertNotIn("rabbit-pool-project", labels)
         mock_client.optimize_job.assert_called_once()
 
-    def test_missing_reservation_ids_calls_optimizer_with_empty_list(self):
+    def test_on_demand_missing_reservation_ids_skips_optimizer(self):
+        import importlib
+
+        import rabbit_bq_optimizer_plugin as plugin_module
+        from airflow.models import Variable
+        from airflow.providers.google.cloud.hooks.bigquery import BigQueryHook
+
+        importlib.reload(plugin_module)
+
+        original_config = {"query": {"query": "SELECT 1", "useLegacySql": False}}
+        submitted: dict = {}
+
+        def fake_bq_submit(self, *, configuration, **kwargs):
+            submitted["configuration"] = configuration
+            return MagicMock(job_id="mock-job-empty-res")
+
+        BigQueryHook.insert_job = fake_bq_submit
+
+        mock_client = MagicMock()
+
+        with (
+            patch.object(
+                Variable,
+                "get",
+                return_value={"default_pricing_mode": "on_demand"},
+            ),
+            patch.object(
+                plugin_module,
+                "_load_rabbit_credentials",
+                return_value={"api_key": "k", "base_url": None},
+            ),
+            patch.object(plugin_module, "RabbitBQJobOptimizer", return_value=mock_client),
+        ):
+            plugin_module.patch_bigquery_hook()
+
+            hook = BigQueryHook(gcp_conn_id="google_cloud_default")
+            hook.insert_job(
+                configuration=dict(original_config),
+                project_id=SOURCE_PROJECT,
+            )
+
+        mock_client.optimize_job.assert_not_called()
+        self.assertEqual(submitted["configuration"], original_config)
+
+    def test_slot_based_missing_reservation_ids_calls_optimizer_with_empty_list(self):
         import importlib
 
         import rabbit_bq_optimizer_plugin as plugin_module
@@ -297,7 +342,7 @@ class TestPluginOptimization(unittest.TestCase):
         importlib.reload(plugin_module)
 
         def fake_bq_submit(self, *, configuration, **kwargs):
-            return MagicMock(job_id="mock-job-empty-res")
+            return MagicMock(job_id="mock-job-slot-empty-res")
 
         BigQueryHook.insert_job = fake_bq_submit
 
@@ -308,7 +353,7 @@ class TestPluginOptimization(unittest.TestCase):
             patch.object(
                 Variable,
                 "get",
-                return_value={"default_pricing_mode": "on_demand"},
+                return_value={"default_pricing_mode": "slot_based"},
             ),
             patch.object(
                 plugin_module,

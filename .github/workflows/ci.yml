@@ -60,12 +60,12 @@ jobs:
           pip install "apache-airflow==${AIRFLOW_VERSION}" --constraint "${CONSTRAINT_URL}"
           pip install -r bq-job-optimizer-airflow-2/test_requirements.txt --constraint "${CONSTRAINT_URL}"
           pip install --constraint "${CONSTRAINT_URL}" google-auth-httplib2 google-api-python-client pandas-gbq gcloud-aio-bigquery gcloud-aio-storage google-cloud-secret-manager google-cloud-storage
+          pip install --constraint "${CONSTRAINT_URL}" -e .
 
       - name: Set up Airflow
         run: |
           export AIRFLOW_HOME=$(pwd)/airflow_home
-          mkdir -p $AIRFLOW_HOME/plugins $AIRFLOW_HOME/dags
-          cp bq-job-optimizer-airflow-2/rabbit_bq_optimizer_plugin.py $AIRFLOW_HOME/plugins/
+          mkdir -p $AIRFLOW_HOME/dags
           cp bq-job-optimizer-airflow-2/test_dag.py $AIRFLOW_HOME/dags/
           airflow db init
           echo -e "admin\nadmin\nAdmin\nUser\nadmin@example.com\n" | airflow users create --username admin --firstname Admin --lastname User --role Admin --email admin@example.com || true
@@ -85,5 +85,12 @@ jobs:
         run: |
           export AIRFLOW_HOME=$(pwd)/airflow_home
           python bq-job-optimizer-airflow-2/test_dag_execution.py
+        env:
+          AIRFLOW_HOME: ${{ github.workspace }}/airflow_home
+
+      - name: Run plugin optimization tests
+        run: |
+          export AIRFLOW_HOME=$(pwd)/airflow_home
+          python -m unittest bq-job-optimizer-airflow-2/test_plugin_optimization.py
         env:
           AIRFLOW_HOME: ${{ github.workspace }}/airflow_home

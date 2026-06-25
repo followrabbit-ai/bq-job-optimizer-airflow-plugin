@@ -14,7 +14,6 @@ from unittest.mock import MagicMock, patch
 script_dir = os.path.dirname(os.path.abspath(__file__))
 repo_root = os.path.dirname(script_dir)
 os.environ["AIRFLOW_HOME"] = os.path.join(repo_root, "airflow_home")
-sys.path.insert(0, os.path.join(os.environ["AIRFLOW_HOME"], "plugins"))
 
 # Import Airflow components
 from airflow.hooks.base import BaseHook  # noqa: E402
