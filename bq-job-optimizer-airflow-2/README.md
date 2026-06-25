@@ -18,75 +18,49 @@ Choose **one** of the following — do not use both in the same Airflow environm
 
 ### Option A: PyPI (recommended)
 
-1. Add the plugin and client to your Airflow environment:
-   - If using `requirements.txt`:
-     ```bash
-     echo "rabbit-bq-job-optimizer==0.1.18" >> requirements.txt
-     echo "rabbit-bq-optimizer-airflow-plugin==1.0.0" >> requirements.txt
-     pip install -r requirements.txt
-     ```
-   - If using `constraints.txt`:
-     ```bash
-     echo "rabbit-bq-job-optimizer==0.1.18" >> constraints.txt
-     echo "rabbit-bq-optimizer-airflow-plugin==1.0.0" >> constraints.txt
-     pip install -r constraints.txt
-     ```
-   - If using a custom Docker image, add to your Dockerfile:
-     ```dockerfile
-     RUN pip install rabbit-bq-job-optimizer==0.1.18 rabbit-bq-optimizer-airflow-plugin==1.0.0
-     ```
+1. Add both packages to your Airflow environment dependencies (for example `requirements.txt`, Composer PyPI packages, or a custom image build):
+
+   ```txt
+   rabbit-bq-job-optimizer==0.1.18
+   rabbit-bq-optimizer-airflow-plugin==1.0.0
+   ```
 
    The plugin registers via Airflow's plugin entry point — no file copy into `plugins/` is required.
 
-2. Restart your Airflow scheduler, workers, and webserver to load the plugin. If you use deferrable `BigQueryInsertJobOperator`, restart the triggerer as well.
+2. Apply the dependency update using your platform's usual process, then restart Airflow components so the plugin loads (scheduler, workers, webserver, and triggerer if you use deferrable `BigQueryInsertJobOperator`).
 
 ### Option B: Copy into `plugins/`
 
-1. Add the Python client to your Airflow environment `requirements.txt` (or equivalent):
+1. Add the Python client to your Airflow environment dependencies:
 
    ```txt
    rabbit-bq-job-optimizer==0.1.18
    ```
 
-2. Copy the plugin file into your Airflow plugins directory (Composer: plugins bucket; self-managed: `$AIRFLOW_HOME/plugins/`):
+2. Deploy `rabbit_bq_optimizer_plugin.py` from this repo to your environment's Airflow plugins location.
 
-   ```bash
-   cp bq-job-optimizer-airflow-2/rabbit_bq_optimizer_plugin.py "$AIRFLOW_HOME/plugins/"
-   ```
-
-3. Restart your Airflow scheduler, workers, and webserver (and triggerer if using deferrable operators).
+3. Apply the dependency update and plugin deploy using your platform's usual process, then restart Airflow components (including the triggerer if you use deferrable operators).
 
 ## Updating
 
 ### PyPI install
 
-Bump versions in `requirements.txt` (or your environment's package list), then update/rebuild the environment:
+Update to the new package versions in your environment dependencies:
 
 ```txt
 rabbit-bq-job-optimizer==0.1.18
 rabbit-bq-optimizer-airflow-plugin==1.0.0
 ```
 
-Then restart the scheduler, workers, and webserver (and the triggerer if you use deferrable `BigQueryInsertJobOperator`). Your `rabbit_api` connection, `rabbit_bq_optimizer_config` variable, and DAGs are unchanged. If optimization fails, the plugin still submits the original job (fail-open).
+Apply the update using your platform's usual process, then restart Airflow components (including the triggerer if you use deferrable `BigQueryInsertJobOperator`). Your `rabbit_api` connection, `rabbit_bq_optimizer_config` variable, and DAGs are unchanged. If optimization fails, the plugin still submits the original job (fail-open).
 
 ### Copy into `plugins/` (optional)
 
-If you installed via [Option B](#option-b-copy-into-plugins) and want to stay on the copy method, replace the file in your plugins directory with the new version from this repo, then restart Airflow:
-
-```bash
-pip install --upgrade rabbit-bq-job-optimizer==0.1.18
-cp bq-job-optimizer-airflow-2/rabbit_bq_optimizer_plugin.py "$AIRFLOW_HOME/plugins/"
-```
-
-Then restart the scheduler, workers, and webserver (and the triggerer if you use deferrable `BigQueryInsertJobOperator`). Your `rabbit_api` connection, `rabbit_bq_optimizer_config` variable, and DAGs are unchanged. If optimization fails, the plugin still submits the original job (fail-open).
+If you installed via [Option B](#option-b-copy-into-plugins) and want to stay on the copy method, bump the client version in your environment dependencies and replace `rabbit_bq_optimizer_plugin.py` in your plugins location with the new file from this repo. Then restart Airflow components as above.
 
 ### Switching from copy to PyPI
 
-If you previously copied `rabbit_bq_optimizer_plugin.py` into `$AIRFLOW_HOME/plugins/` and are switching to the PyPI package, **remove that file** — the PyPI install loads via an entry point and the copied file causes duplicate plugin registration. On startup the plugin logs an error if both are present. To remove the copied file automatically (when writable), set:
-
-```bash
-export RABBIT_BQ_OPTIMIZER_REMOVE_LEGACY_PLUGIN=true
-```
+If you previously deployed `rabbit_bq_optimizer_plugin.py` to your plugins location and are switching to the PyPI package, **remove that file** — the PyPI install loads via an entry point and the copied file causes duplicate plugin registration. On startup the plugin logs an error if both are present. When the file is writable, you can set `RABBIT_BQ_OPTIMIZER_REMOVE_LEGACY_PLUGIN=true` to remove it automatically on load.
 
 For pool billing routing, the Airflow service account also needs `roles/bigquery.jobUser` on the pool billing projects — contact Rabbit support for your project list. See [Pool billing project routing](#pool-billing-project-routing).
 
