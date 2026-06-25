@@ -18,34 +18,43 @@ Choose **one** of the following — do not use both in the same Airflow environm
 
 ### Option A: PyPI (recommended)
 
-1. Install the plugin and its dependencies in your Airflow environment:
-   - If using `requirements.txt`:
-     ```bash
-     echo "rabbit-bq-optimizer-airflow-plugin" >> requirements.txt
-     pip install -r requirements.txt
-     ```
-   - If using `constraints.txt`:
-     ```bash
-     echo "rabbit-bq-optimizer-airflow-plugin" >> constraints.txt
-     pip install -r constraints.txt
-     ```
-   - If using a custom Docker image, add to your Dockerfile:
-     ```dockerfile
-     RUN pip install rabbit-bq-optimizer-airflow-plugin
-     ```
+Add **both** dependencies to your Airflow environment (managed environments such as Composer install from `requirements.txt` — you do not `pip install` on running workers):
 
-   This installs `rabbit-bq-job-optimizer` (Python client) automatically. The plugin registers via Airflow's plugin entry point — no file copy into `plugins/` is required.
+```txt
+rabbit-bq-job-optimizer>=0.1.17
+rabbit-bq-optimizer-airflow-plugin>=1.0.0
+```
 
-2. Restart your Airflow scheduler, workers, and webserver to load the plugin. If you use deferrable `BigQueryInsertJobOperator`, restart the triggerer as well.
+Pin exact versions if your environment requires it:
+
+```txt
+rabbit-bq-job-optimizer==0.1.17
+rabbit-bq-optimizer-airflow-plugin==1.0.0
+```
+
+How you apply that depends on your setup:
+
+- **`requirements.txt`** (Composer, MWAA, custom images): add the lines above, then update/rebuild the environment so packages are installed on scheduler, workers, and webserver.
+- **`constraints.txt`**: add the same package lines to your constraints or requirements file used at image build time.
+- **Dockerfile**:
+  ```dockerfile
+  RUN pip install "rabbit-bq-job-optimizer>=0.1.17" "rabbit-bq-optimizer-airflow-plugin>=1.0.0"
+  ```
+
+The plugin registers via Airflow's plugin entry point — no file copy into `plugins/` is required. Listing the client explicitly keeps your `requirements.txt` self-contained and makes version upgrades visible alongside the plugin.
+
+Restart your Airflow scheduler, workers, and webserver after the environment update. If you use deferrable `BigQueryInsertJobOperator`, restart the triggerer as well.
 
 ### Option B: Copy into `plugins/`
 
-1. Install the Python client in your Airflow environment:
-   ```bash
-   pip install rabbit-bq-job-optimizer
+1. Add the Python client to your Airflow environment `requirements.txt` (or equivalent):
+
+   ```txt
+   rabbit-bq-job-optimizer>=0.1.17
    ```
 
-2. Copy the plugin file into your Airflow plugins directory:
+2. Copy the plugin file into your Airflow plugins directory (Composer: plugins bucket; self-managed: `$AIRFLOW_HOME/plugins/`):
+
    ```bash
    cp bq-job-optimizer-airflow-2/rabbit_bq_optimizer_plugin.py "$AIRFLOW_HOME/plugins/"
    ```
@@ -56,10 +65,11 @@ Choose **one** of the following — do not use both in the same Airflow environm
 
 ### PyPI install
 
-Upgrade the package:
+Bump versions in `requirements.txt` (or your environment's package list), then update/rebuild the environment:
 
-```bash
-pip install --upgrade rabbit-bq-optimizer-airflow-plugin
+```txt
+rabbit-bq-job-optimizer>=0.1.17
+rabbit-bq-optimizer-airflow-plugin>=1.0.0
 ```
 
 Then restart the scheduler, workers, and webserver (and the triggerer if you use deferrable `BigQueryInsertJobOperator`). Your `rabbit_api` connection, `rabbit_bq_optimizer_config` variable, and DAGs are unchanged. If optimization fails, the plugin still submits the original job (fail-open).
