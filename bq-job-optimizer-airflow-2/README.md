@@ -54,13 +54,28 @@ Choose **one** of the following — do not use both in the same Airflow environm
 
 ## Updating
 
-Upgrade the PyPI package:
+### PyPI install
+
+Upgrade the package:
 
 ```bash
 pip install --upgrade rabbit-bq-optimizer-airflow-plugin
 ```
 
 Then restart the scheduler, workers, and webserver (and the triggerer if you use deferrable `BigQueryInsertJobOperator`). Your `rabbit_api` connection, `rabbit_bq_optimizer_config` variable, and DAGs are unchanged. If optimization fails, the plugin still submits the original job (fail-open).
+
+### Copy into `plugins/` (optional)
+
+If you installed via [Option B](#option-b-copy-into-plugins) and want to stay on the copy method, replace the file in your plugins directory with the new version from this repo, then restart Airflow:
+
+```bash
+pip install --upgrade rabbit-bq-job-optimizer
+cp bq-job-optimizer-airflow-2/rabbit_bq_optimizer_plugin.py "$AIRFLOW_HOME/plugins/"
+```
+
+Then restart the scheduler, workers, and webserver (and the triggerer if you use deferrable `BigQueryInsertJobOperator`). Your `rabbit_api` connection, `rabbit_bq_optimizer_config` variable, and DAGs are unchanged. If optimization fails, the plugin still submits the original job (fail-open).
+
+### Switching from copy to PyPI
 
 If you previously copied `rabbit_bq_optimizer_plugin.py` into `$AIRFLOW_HOME/plugins/` and are switching to the PyPI package, **remove that file** — the PyPI install loads via an entry point and the copied file causes duplicate plugin registration. On startup the plugin logs an error if both are present. To remove the copied file automatically (when writable), set:
 
