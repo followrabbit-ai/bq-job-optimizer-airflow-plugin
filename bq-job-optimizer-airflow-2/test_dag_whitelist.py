@@ -41,8 +41,10 @@ def _make_mock_optimizer_response():
 
 def _reset_patch():
     """Remove the patch marker so patch_bigquery_hook() can be applied again."""
-    if hasattr(BigQueryHook, "_rabbit_bq_job_optimizer_patched"):
-        delattr(BigQueryHook, "_rabbit_bq_job_optimizer_patched")
+    from rabbit_bq_optimizer_plugin import RABBIT_HOOK_PATCHED_MARKER
+
+    if hasattr(BigQueryHook, RABBIT_HOOK_PATCHED_MARKER):
+        delattr(BigQueryHook, RABBIT_HOOK_PATCHED_MARKER)
 
 
 def _run_insert_job(config):

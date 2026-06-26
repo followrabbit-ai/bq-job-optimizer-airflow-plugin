@@ -9,4 +9,8 @@ This repository contains the source code for Rabbit's Airflow plugins, specifica
 
 Refer to `bq-job-optimizer-airflow-2/README.md` for installation, configuration, and the end-to-end test plan.
 
+## PyPI
+
+The Airflow 2 plugin is published as [`rabbit-bq-optimizer-airflow-plugin`](https://pypi.org/project/rabbit-bq-optimizer-airflow-plugin/). Release with `./publish_to_pypi.sh` (same flow as the [python-bq-job-optimizer](https://github.com/followrabbit-ai/python-bq-job-optimizer) client).
+
 For more information about Rabbit and our data platform, visit [https://followrabbit.ai/](https://followrabbit.ai/).

@@ -3,5 +3,9 @@
     "reservation_ids": [
         "project:us-central1.reservation-name1",
         "project:us-east1.reservation-name2"
+    ],
+    "dag_whitelist": [
+        "my_etl_dag",
+        "my_analytics_dag"
     ]
 }

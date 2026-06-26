@@ -1,3 +1,2 @@
-rabbit-bq-job-optimizer
 apache-airflow-providers-google
 google-cloud-bigquery

@@ -6,33 +6,73 @@ This Airflow plugin automatically optimizes BigQuery job configurations using th
 
 - Automatically intercepts all BigQuery job submissions
 - Optimizes job configurations via the Rabbit API
+- Routes `BigQueryInsertJobOperator` submits to an on-demand pool billing project when the optimizer sets `optimizedJob.jobReference.projectId`
 - Graceful fallback to original configuration if optimization fails
 - Comprehensive error handling and logging
 
+Already running an older version? See [Updating](#updating).
+
 ## Installation
 
-1. Add the dependency to your Airflow environment:
+### Option A: PyPI (recommended)
+
+1. Add the plugin and client to your Airflow environment:
    - If using `requirements.txt`:
-     ```bash
-     echo "rabbit-bq-job-optimizer" >> requirements.txt
-     pip install -r requirements.txt
+     ```txt
+     rabbit-bq-job-optimizer==0.1.18
+     rabbit-bq-optimizer-airflow-plugin==1.0.0
      ```
    - If using `constraints.txt`:
-     ```bash
-     echo "rabbit-bq-job-optimizer" >> constraints.txt
-     pip install -r constraints.txt
+     ```txt
+     rabbit-bq-job-optimizer==0.1.18
+     rabbit-bq-optimizer-airflow-plugin==1.0.0
      ```
    - If using a custom Docker image, add to your Dockerfile:
      ```dockerfile
-     RUN pip install rabbit-bq-job-optimizer
+     RUN pip install rabbit-bq-job-optimizer==0.1.18 rabbit-bq-optimizer-airflow-plugin==1.0.0
      ```
 
-2. Add the plugin to your Airflow plugins directory:
-```bash
-cp rabbit_bq_optimizer_plugin.py $AIRFLOW_HOME/plugins/
+   The plugin registers via Airflow's plugin entry point — no file copy into `plugins/` is required.
+
+2. Restart your Airflow scheduler, workers, and webserver to load the plugin. If you use deferrable `BigQueryInsertJobOperator`, restart the triggerer as well.
+
+### Option B: Copy into `plugins/`
+
+1. Add the Python client to your Airflow environment dependencies:
+
+   ```txt
+   rabbit-bq-job-optimizer==0.1.18
+   ```
+
+2. Copy the plugin file into your Airflow plugins directory:
+   ```bash
+   cp bq-job-optimizer-airflow-2/rabbit_bq_optimizer_plugin.py "$AIRFLOW_HOME/plugins/"
+   ```
+
+3. Restart your Airflow scheduler, workers, and webserver (and triggerer if using deferrable operators).
+
+## Updating
+
+### PyPI install
+
+Update to the new package versions in your environment dependencies:
+
+```txt
+rabbit-bq-job-optimizer==0.1.18
+rabbit-bq-optimizer-airflow-plugin==1.0.0
 ```
 
-3. Restart your Airflow webserver, scheduler, and workers to load the plugin.
+Apply the update using your platform's usual process, then restart Airflow components (including the triggerer if you use deferrable `BigQueryInsertJobOperator`). Your `rabbit_api` connection, `rabbit_bq_optimizer_config` variable, and DAGs are unchanged. If optimization fails, the plugin still submits the original job (fail-open).
+
+### Copy into `plugins/` (optional)
+
+If you installed via [Option B](#option-b-copy-into-plugins) and want to stay on the copy method, bump the client version in your environment dependencies and replace `rabbit_bq_optimizer_plugin.py` in your plugins location with the new file from this repo. Then restart Airflow components as above.
+
+### Switching from copy to PyPI
+
+If you previously deployed `rabbit_bq_optimizer_plugin.py` to your plugins location and are switching to the PyPI package, **remove that file** — the PyPI install loads via an entry point and the copied file causes duplicate plugin registration. On startup the plugin logs an error if both are present. When the file is writable, you can set `RABBIT_BQ_OPTIMIZER_REMOVE_LEGACY_PLUGIN=true` to remove it automatically on load.
+
+For pool billing routing, the Airflow service account also needs `roles/bigquery.jobUser` on the pool billing projects — contact Rabbit support for your project list. See [Pool billing project routing](#pool-billing-project-routing).
 
 ## Configuration
 
@@ -145,8 +185,9 @@ A setup script `setup_local_test.sh` is provided in the root directory to help y
 
 3. **Verify Results:**
    Check the logs for the following:
-   - `Rabbit BQ Optimizer: Client initialized successfully`
-   - `Rabbit BQ Optimizer: Received optimization result` (or failure if using dummy key/URL)
+   - `Rabbit BQ Optimizer: patching BigQueryHook.insert_job` (scheduler logs at startup)
+   - `Rabbit BQ Optimizer: patching BigQueryInsertJobOperator._submit_job` (scheduler logs at startup)
+   - `Rabbit BQ Optimizer: optimization result=...` at DEBUG on job submit (or failure if using dummy key/URL)
 
 4. **Run automated tests:**
    After setup, you can run automated tests to validate the plugin:
@@ -184,6 +225,13 @@ A setup script `setup_local_test.sh` is provided in the root directory to help y
    - Only whitelisted DAGs are optimized when the list is set
    - Safe fallback (skips optimization) when whitelist is set but Airflow context is unavailable
 
+   **Test plugin optimization (unit, no real BQ):**
+   ```bash
+   source venv/bin/activate
+   export AIRFLOW_HOME=$(pwd)/airflow_home
+   python -m unittest bq-job-optimizer-airflow-2/test_plugin_optimization.py -v
+   ```
+
 5. **Cleanup (optional):**
    To remove the test environment (venv and airflow_home directories):
    ```bash
@@ -210,8 +258,8 @@ A setup script `setup_local_test.sh` is provided in the root directory to help y
    - Trigger a DAG that uses `BigQueryInsertJobOperator` (or any BigQuery operator).
 
 4. **Positive path (connection + variable present)**
-   - Confirm in the scheduler logs that the plugin logs `Client initialized successfully`.
-   - Validate that the BigQuery job request reaches Rabbit (check Rabbit logs or look for the `Rabbit BQ Optimizer: Received optimization result` log line).
+   - Confirm in the scheduler logs at startup that the plugin logs `patching BigQueryHook.insert_job` and `patching BigQueryInsertJobOperator._submit_job`.
+   - Validate that the BigQuery job request reaches Rabbit (check Rabbit logs or enable DEBUG for `Rabbit BQ Optimizer: optimization result=...`).
    - For a query with historical data/reservations, verify the resulting BigQuery job uses the optimized configuration.
 
 5. **Missing connection safety net**
@@ -245,6 +293,34 @@ insert_job = BigQueryInsertJobOperator(
 )
 ```
 
+### Pool billing project routing
+
+When the optimizer returns a pool billing project in
+`optimizedJob.jobReference.projectId`, jobs submitted through
+`BigQueryInsertJobOperator` run and poll on that project. The plugin briefly
+links the operator to the hook during `_submit_job` so `operator.project_id`
+and the BigQuery `jobs.insert` call use the same billing project.
+
+Direct `BigQueryHook.insert_job` calls still receive the optimized
+configuration but keep the original `project_id`. Use
+`BigQueryInsertJobOperator` in DAGs when you need pool billing project
+routing with deferrable tasks.
+
+If the optimizer response has no `jobReference.projectId` (for example
+reservation-only assignment), the operator keeps its configured source
+`project_id`.
+
+### Job labels
+
+Optimized jobs include labels you can query in BigQuery
+(`INFORMATION_SCHEMA.JOBS_BY_*`) to confirm how each submit was handled:
+
+| Label | Values | Meaning |
+|-------|--------|---------|
+| `rabbit-source-project` | GCP project id | Project the job was submitted from (your DAG / operator `project_id`) |
+| `rabbit-pool-project` | GCP project id | Pool billing project recommended by the optimizer (present only when a pool was assigned) |
+| `rabbit-pool-routing` | `applied` \| `skipped` \| `none` | `applied`: `BigQueryInsertJobOperator` submitted on `rabbit-pool-project`; `skipped`: pool recommended but submit stayed on the source project (typically a direct hook call); `none`: no pool billing project in the optimizer response |
+
 ## Error Handling
 
 The plugin includes comprehensive error handling for:
@@ -258,13 +334,13 @@ In all error cases, the plugin will log a warning and proceed with the original 
 ## Troubleshooting
 
 ```
-Broken plugin: [/home/airflow/gcs/plugins/rabbit_bq_optimizer_plugin.py] No module named 'rabbit_bq_job_optimizer'
+Broken plugin: `No module named 'rabbit_bq_job_optimizer'` — install `rabbit-bq-optimizer-airflow-plugin` (or `rabbit-bq-job-optimizer`) in the Airflow environment and restart.
 ```
 
 If you see this error, it means the rabbit-bq-job-optimizer package is missing from your Airflow environment. Install it by adding the package (https://pypi.org/project/rabbit-bq-job-optimizer/) to your Airflow requirements or environment.
 
 ```
-[2025-06-15, 17:25:20 UTC] {rabbit_bq_optimizer_plugin.py:26} WARNING - Rabbit BQ Optimizer: Configuration error: 'Variable rabbit_bq_optimizer_config does not exist'. Proceeding with original job configuration.
+[2025-06-15, 17:25:20 UTC] {rabbit_bq_optimizer_plugin.py:82} WARNING - Rabbit BQ Optimizer: config error: 'Variable rabbit_bq_optimizer_config does not exist'. Using original job.
 ```
 
 If you see this error, it means the Airflow variable `rabbit_bq_optimizer_config` is not set or has invalid content. Make sure you have:
