@@ -55,7 +55,11 @@ class TestPluginOptimization(unittest.TestCase):
             patch.object(
                 Variable,
                 "get",
-                return_value={"enabled": True, "default_pricing_mode": "on_demand", "reservation_ids": ["p:US.r"]},
+                return_value={
+                    "enabled": True,
+                    "default_pricing_mode": "on_demand",
+                    "reservation_ids": ["p:US.r"],
+                },
             ),
             patch.object(
                 plugin_module,
