@@ -117,9 +117,9 @@ The remaining optimizer configuration stays in an Airflow variable. Create a JSO
 
 ### Configuration Fields
 
-- `enabled` (optional, default `true`): When `false`, or when the variable is not set, each BigQuery submit bypasses optimization (no API call). Takes effect on the next job without restarting Airflow.
-- `default_pricing_mode` (required when enabled): The default pricing mode for jobs. Must be one of: `"on_demand"` or `"slot_based"`
-- `reservation_ids` (required when enabled): List of reservation IDs in the format "project:region.reservation-name"
+- `enabled` (required): Must be `true` to run optimization. If omitted, `false`, or the variable is not set, each BigQuery submit bypasses optimization (no API call). Takes effect on the next job without restarting Airflow.
+- `default_pricing_mode` (required when `enabled` is `true`): The default pricing mode for jobs. Must be one of: `"on_demand"` or `"slot_based"`
+- `reservation_ids` (required when `enabled` is `true`): List of reservation IDs in the format "project:region.reservation-name"
 
 ### Setting the Configuration
 
@@ -128,6 +128,7 @@ You can set the configuration in two ways:
 1. Using the Airflow CLI:
 ```bash
 airflow variables set rabbit_bq_optimizer_config '{
+    "enabled": true,
     "default_pricing_mode": "on_demand",
     "reservation_ids": [
         "project:region.reservation-name1",
@@ -332,6 +333,7 @@ If you see this on job submit, the Airflow variable `rabbit_bq_optimizer_config`
 2. Set valid JSON content that includes all required fields:
    ```json
    {
+       "enabled": true,
        "default_pricing_mode": "on_demand",
        "reservation_ids": [
            "project:us-central1.reservation-name1",

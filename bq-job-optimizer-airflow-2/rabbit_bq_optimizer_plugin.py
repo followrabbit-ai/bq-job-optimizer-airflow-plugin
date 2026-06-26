@@ -7,8 +7,8 @@ short-lived hook bridge so operator-driven submits can also route ``project_id``
 on-demand pool when the optimizer sets ``optimizedJob.jobReference.projectId``.
 
 The ``rabbit_bq_optimizer_config`` variable is read once per job submit at the hook
-boundary; when missing or ``enabled`` is false, the original ``insert_job`` runs with no
-API call.
+boundary; optimization runs only when ``enabled`` is explicitly ``true``. Otherwise the
+original ``insert_job`` runs with no API call.
 """
 
 from __future__ import annotations
@@ -84,8 +84,15 @@ def _load_optimizer_config() -> dict[str, Any] | None:
         if not raw or not isinstance(raw, dict):
             raise ValueError(f"{OPTIMIZER_VARIABLE} not set or invalid")
 
-        # Explicit opt-out; omitted key defaults to enabled.
-        enabled = raw.get("enabled", True)
+        # Optimization is opt-in; enabled must be present and true.
+        if "enabled" not in raw:
+            logging.info(
+                "Rabbit BQ Optimizer: %s missing enabled field. Using original job.",
+                OPTIMIZER_VARIABLE,
+            )
+            return None
+
+        enabled = raw["enabled"]
         if isinstance(enabled, str):
             enabled = enabled.strip().lower() in ("true", "1", "yes", "on")
         if not enabled:
