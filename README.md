@@ -5,7 +5,7 @@ This repository contains the source code for Rabbit's Airflow plugins, specifica
 - Patches the BigQuery hook to transparently send job configurations to the Rabbit Job Optimizer service.
 - Authenticates via the official `rabbit-bq-job-optimizer` Python client (install the latest version for compatibility).
 - Retrieves the Rabbit API key (and optional base URL override) from the Airflow connection `rabbit_api` so secrets stay out of plain-text variables.
-- Reads optimization parameters (pricing mode, reservation IDs, etc.) from the `rabbit_bq_optimizer_config` Airflow variable.
+- Reads optimization parameters (pricing mode, reservation IDs, etc.) from the `rabbit_bq_optimizer_config` Airflow variable. Optimization runs only when `"enabled": true` is set explicitly; otherwise BigQuery jobs are unchanged on each submit.
 
 Refer to `bq-job-optimizer-airflow-2/README.md` for installation, configuration, and the end-to-end test plan.
 

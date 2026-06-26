@@ -20,16 +20,16 @@ Already running an older version? See [Updating](#updating).
    - If using `requirements.txt`:
      ```txt
      rabbit-bq-job-optimizer==0.1.18
-     rabbit-bq-optimizer-airflow-plugin==1.0.0
+     rabbit-bq-optimizer-airflow-plugin==1.0.1
      ```
    - If using `constraints.txt`:
      ```txt
      rabbit-bq-job-optimizer==0.1.18
-     rabbit-bq-optimizer-airflow-plugin==1.0.0
+     rabbit-bq-optimizer-airflow-plugin==1.0.1
      ```
    - If using a custom Docker image, add to your Dockerfile:
      ```dockerfile
-     RUN pip install rabbit-bq-job-optimizer==0.1.18 rabbit-bq-optimizer-airflow-plugin==1.0.0
+     RUN pip install rabbit-bq-job-optimizer==0.1.18 rabbit-bq-optimizer-airflow-plugin==1.0.1
      ```
 
    The plugin registers via Airflow's plugin entry point — no file copy into `plugins/` is required.
@@ -59,7 +59,7 @@ Update to the new package versions in your environment dependencies:
 
 ```txt
 rabbit-bq-job-optimizer==0.1.18
-rabbit-bq-optimizer-airflow-plugin==1.0.0
+rabbit-bq-optimizer-airflow-plugin==1.0.1
 ```
 
 Apply the update using your platform's usual process, then restart Airflow components (including the triggerer if you use deferrable `BigQueryInsertJobOperator`). Your `rabbit_api` connection, `rabbit_bq_optimizer_config` variable, and DAGs are unchanged. If optimization fails, the plugin still submits the original job (fail-open).
@@ -106,6 +106,7 @@ The remaining optimizer configuration stays in an Airflow variable. Create a JSO
 
 ```json
 {
+    "enabled": true,
     "default_pricing_mode": "on_demand",
     "reservation_ids": [
         "project:region.reservation-name1",
@@ -116,8 +117,9 @@ The remaining optimizer configuration stays in an Airflow variable. Create a JSO
 
 ### Configuration Fields
 
-- `default_pricing_mode` (required): The default pricing mode for jobs. Must be one of: `"on_demand"` or `"slot_based"`
-- `reservation_ids` (required): List of reservation IDs in the format "project:region.reservation-name"
+- `enabled` (required): Must be `true` to run optimization. If omitted, `false`, or the variable is not set, each BigQuery submit bypasses optimization (no API call). Takes effect on the next job without restarting Airflow.
+- `default_pricing_mode` (required when `enabled` is `true`): The default pricing mode for jobs. Must be one of: `"on_demand"` or `"slot_based"`
+- `reservation_ids` (required when `enabled` is `true`): List of reservation IDs in the format "project:region.reservation-name"
 
 ### Setting the Configuration
 
@@ -126,6 +128,7 @@ You can set the configuration in two ways:
 1. Using the Airflow CLI:
 ```bash
 airflow variables set rabbit_bq_optimizer_config '{
+    "enabled": true,
     "default_pricing_mode": "on_demand",
     "reservation_ids": [
         "project:region.reservation-name1",
@@ -321,15 +324,16 @@ Broken plugin: `No module named 'rabbit_bq_job_optimizer'` — install `rabbit-b
 If you see this error, it means the rabbit-bq-job-optimizer package is missing from your Airflow environment. Install it by adding the package (https://pypi.org/project/rabbit-bq-job-optimizer/) to your Airflow requirements or environment.
 
 ```
-[2025-06-15, 17:25:20 UTC] {rabbit_bq_optimizer_plugin.py:82} WARNING - Rabbit BQ Optimizer: config error: 'Variable rabbit_bq_optimizer_config does not exist'. Using original job.
+[2025-06-15, 17:25:20 UTC] {rabbit_bq_optimizer_plugin.py} WARNING - Rabbit BQ Optimizer: config error: rabbit_bq_optimizer_config not set or invalid. Using original job.
 ```
 
-If you see this error, it means the Airflow variable `rabbit_bq_optimizer_config` is not set or has invalid content. Make sure you have:
+If you see this on job submit, the Airflow variable `rabbit_bq_optimizer_config` is not set or has invalid content. Make sure you have:
 
 1. Created the variable named exactly `rabbit_bq_optimizer_config`
 2. Set valid JSON content that includes all required fields:
    ```json
    {
+       "enabled": true,
        "default_pricing_mode": "on_demand",
        "reservation_ids": [
            "project:us-central1.reservation-name1",
