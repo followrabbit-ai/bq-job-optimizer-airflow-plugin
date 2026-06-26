@@ -5,6 +5,10 @@ Patches ``BigQueryHook.insert_job`` so every BQ submit is optimized via the Rabb
 before ``jobs.insert``. Patches ``BigQueryInsertJobOperator._submit_job`` with a
 short-lived hook bridge so operator-driven submits can also route ``project_id`` to an
 on-demand pool when the optimizer sets ``optimizedJob.jobReference.projectId``.
+
+The ``rabbit_bq_optimizer_config`` variable is read once per job submit at the hook
+boundary; when missing or ``enabled`` is false, the original ``insert_job`` runs with no
+API call.
 """
 
 from __future__ import annotations
@@ -75,43 +79,51 @@ def _resolve_source_project(*, project_id: str | None, hook) -> str | None:
 
 def _load_optimizer_config() -> dict[str, Any] | None:
     try:
-        config = Variable.get(OPTIMIZER_VARIABLE, deserialize_json=True)
-        if not config:
-            raise KeyError(f"{OPTIMIZER_VARIABLE} is empty")
+        raw = Variable.get(OPTIMIZER_VARIABLE, deserialize_json=True)
+        # Variable missing, empty, or not a JSON object.
+        if not raw or not isinstance(raw, dict):
+            raise ValueError(f"{OPTIMIZER_VARIABLE} not set or invalid")
+
+        # Explicit opt-out; omitted key defaults to enabled.
+        enabled = raw.get("enabled", True)
+        if isinstance(enabled, str):
+            enabled = enabled.strip().lower() in ("true", "1", "yes", "on")
+        if not enabled:
+            logging.info(
+                "Rabbit BQ Optimizer: disabled via %s (enabled=false). Using original job.",
+                OPTIMIZER_VARIABLE,
+            )
+            return None
+
+        # Required optimizer input.
+        if "default_pricing_mode" not in raw:
+            raise ValueError("missing default_pricing_mode")
+
+        # Only supported pricing modes.
+        if raw["default_pricing_mode"] not in ("on_demand", "slot_based"):
+            raise ValueError(f"bad default_pricing_mode: {raw['default_pricing_mode']!r}")
+
+        config = dict(raw)
+        reservation_ids = config.get("reservation_ids") or []
+        # On-demand routing needs at least one reservation to compare against.
+        if config["default_pricing_mode"] == "on_demand" and not reservation_ids:
+            raise ValueError("on_demand default with no reservation_ids")
+        config["reservation_ids"] = reservation_ids
+        return config
     except (KeyError, ValueError) as exc:
+        # Missing variable, bad JSON, or failed validation above.
         logging.warning("Rabbit BQ Optimizer: config error: %s. Using original job.", exc)
         return None
-
-    if "default_pricing_mode" not in config:
-        logging.warning("Rabbit BQ Optimizer: missing default_pricing_mode. Using original job.")
-        return None
-
-    if config["default_pricing_mode"] not in ("on_demand", "slot_based"):
-        logging.warning("Rabbit BQ Optimizer: bad default_pricing_mode. Using original job.")
-        return None
-
-    config = dict(config)
-    reservation_ids = config.get("reservation_ids") or []
-    if config["default_pricing_mode"] == "on_demand" and not reservation_ids:
-        logging.warning(
-            "Rabbit BQ Optimizer: on_demand default with no reservation_ids. " "Using original job."
-        )
-        return None
-    config["reservation_ids"] = reservation_ids
-    return config
 
 
 def _optimize(
     *,
+    config: dict[str, Any],
     configuration: dict[str, Any],
     hook,
     project_id: str | None,
 ) -> tuple[dict[str, Any], str | None] | None:
     """Returns (optimized_configuration, pool_billing_project) or None."""
-    config = _load_optimizer_config()
-    if not config:
-        return None
-
     try:
         credentials = _load_rabbit_credentials()
     except Exception as exc:
@@ -214,9 +226,16 @@ def patch_bigquery_hook() -> None:
     original_insert_job = BigQueryHook.insert_job
 
     def patched_insert_job(self, *, configuration: dict, **kwargs) -> BigQueryJob:
+        config = _load_optimizer_config()
+        if not config:
+            return original_insert_job(self, configuration=configuration, **kwargs)
+
         operator = getattr(self, RABBIT_OPERATOR_BRIDGE_ATTR, None)
         outcome = _optimize(
-            configuration=configuration, hook=self, project_id=kwargs.get("project_id")
+            config=config,
+            configuration=configuration,
+            hook=self,
+            project_id=kwargs.get("project_id"),
         )
         if not outcome:
             return original_insert_job(self, configuration=configuration, **kwargs)
