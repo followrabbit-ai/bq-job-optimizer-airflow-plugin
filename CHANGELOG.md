@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.1] - 2026-06-26
+
+### Added
+- `enabled` field on `rabbit_bq_optimizer_config` — optimization runs only when `"enabled": true` is set explicitly; otherwise jobs bypass the optimizer (no API call). Checked at the hook boundary before each optimize call (no restart required).
+
 ## [1.0.0] - 2026-06-24
 
 ### Added

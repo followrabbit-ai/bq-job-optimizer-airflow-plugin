@@ -1,4 +1,5 @@
 {
+    "enabled": true,
     "default_pricing_mode": "on_demand",
     "reservation_ids": [
         "project:us-central1.reservation-name1",

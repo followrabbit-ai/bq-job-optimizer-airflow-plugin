@@ -140,6 +140,7 @@ fi
 # 2. Create Variable
 echo "Setting rabbit_bq_optimizer_config variable..."
 airflow variables set rabbit_bq_optimizer_config '{
+    "enabled": true,
     "default_pricing_mode": "on_demand",
     "reservation_ids": [
         "project:us-central1.test-reservation"

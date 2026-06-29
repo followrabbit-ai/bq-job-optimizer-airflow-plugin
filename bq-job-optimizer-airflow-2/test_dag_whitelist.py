@@ -24,9 +24,14 @@ sys.path.insert(0, os.path.join(os.environ["AIRFLOW_HOME"], "plugins"))
 from airflow.providers.google.cloud.hooks.bigquery import BigQueryHook, BigQueryJob  # noqa: E402
 
 VALID_CONFIG_BASE = {
+    "enabled": True,
     "default_pricing_mode": "on_demand",
     "reservation_ids": ["project:us-central1.test-reservation"],
 }
+
+# Passed explicitly so _resolve_source_project returns early instead of touching
+# hook.project_id, which would trigger an ADC lookup and fail in CI (no credentials).
+SOURCE_PROJECT = "test-source-project"
 
 DUMMY_CONNECTION = MagicMock()
 DUMMY_CONNECTION.password = "test-api-key"
@@ -86,7 +91,7 @@ def _run_insert_job(config):
         ),
     ):
         hook = BigQueryHook()
-        hook.insert_job(configuration=original_config)
+        hook.insert_job(configuration=original_config, project_id=SOURCE_PROJECT)
 
     return mock_client.optimize_job.called
 

@@ -70,7 +70,7 @@ jobs:
           airflow db init
           echo -e "admin\nadmin\nAdmin\nUser\nadmin@example.com\n" | airflow users create --username admin --firstname Admin --lastname User --role Admin --email admin@example.com || true
           airflow connections add rabbit_api --conn-type generic --conn-password "test-key" --conn-extra '{"api_base_url": "https://api.followrabbit.ai/bq-job-optimizer"}' || true
-          airflow variables set rabbit_bq_optimizer_config '{"default_pricing_mode": "on_demand", "reservation_ids": ["project:us-central1.test-reservation"]}' || true
+          airflow variables set rabbit_bq_optimizer_config '{"enabled": true, "default_pricing_mode": "on_demand", "reservation_ids": ["project:us-central1.test-reservation"]}' || true
         env:
           AIRFLOW_HOME: ${{ github.workspace }}/airflow_home
 
