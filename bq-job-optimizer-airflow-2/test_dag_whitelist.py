@@ -4,7 +4,7 @@ Test script that verifies the dag_whitelist feature of the Rabbit BQ Optimizer p
 
 Scenarios covered:
   1. No dag_whitelist → all DAGs optimized (backward compatible)
-  2. Empty dag_whitelist → all DAGs optimized
+  2. Empty dag_whitelist → nothing whitelisted, optimization skipped
   3. DAG in whitelist → optimized
   4. DAG not in whitelist → skipped
   5. get_current_context unavailable with whitelist set → skipped (safe fallback)
@@ -109,16 +109,16 @@ def test_no_whitelist_optimizes_all():
         return False
 
 
-def test_empty_whitelist_optimizes_all():
-    """Empty dag_whitelist should behave the same as absent."""
+def test_empty_whitelist_skips_optimization():
+    """Empty dag_whitelist means nothing is whitelisted, so optimization is skipped."""
     config = {**VALID_CONFIG_BASE, "dag_whitelist": []}
     optimized = _run_insert_job(config)
 
-    if optimized:
-        print("✓ Empty dag_whitelist → optimization ran")
+    if not optimized:
+        print("✓ Empty dag_whitelist → optimization skipped")
         return True
     else:
-        print("✗ Empty dag_whitelist → expected optimization to run, but it didn't")
+        print("✗ Empty dag_whitelist → expected optimization to be skipped, but it ran")
         return False
 
 
@@ -197,7 +197,7 @@ if __name__ == "__main__":
 
     tests = [
         test_no_whitelist_optimizes_all,
-        test_empty_whitelist_optimizes_all,
+        test_empty_whitelist_skips_optimization,
         test_dag_in_whitelist_optimized,
         test_dag_not_in_whitelist_skipped,
         test_context_unavailable_skips_when_whitelist_set,

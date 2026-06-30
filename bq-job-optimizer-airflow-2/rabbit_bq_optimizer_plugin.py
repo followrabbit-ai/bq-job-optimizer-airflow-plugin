@@ -128,17 +128,28 @@ def _should_optimize_for_current_dag(config: dict[str, Any]) -> bool:
 
     Returns True when optimization should proceed (no whitelist configured, or the
     current DAG is in it). Returns False — leaving the job untouched — when the
-    whitelist is malformed, the current DAG cannot be determined, or the DAG is not
-    listed.
+    whitelist is empty, malformed, the current DAG cannot be determined, or the DAG
+    is not listed.
+
+    An absent (or ``null``) ``dag_whitelist`` means "no restriction" and optimizes
+    every DAG. An explicit empty list means "nothing is whitelisted" and optimizes
+    no DAG.
     """
     dag_whitelist = config.get("dag_whitelist")
-    if not dag_whitelist:
+    if dag_whitelist is None:
         return True
 
     if not isinstance(dag_whitelist, list):
         logging.warning(
             "Rabbit BQ Optimizer: dag_whitelist must be a list, got %s. Using original job.",
             type(dag_whitelist).__name__,
+        )
+        return False
+
+    if not dag_whitelist:
+        logging.info(
+            "Rabbit BQ Optimizer: dag_whitelist is empty; no DAGs are whitelisted. "
+            "Skipping optimization."
         )
         return False
 

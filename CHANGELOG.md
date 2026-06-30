@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.1.0] - 2026-06-30
+
+### Added
+- Optional `dag_whitelist` field on `rabbit_bq_optimizer_config` — when set to a list of DAG IDs, only BigQuery jobs from those DAGs are optimized; all others pass through unmodified. Omitting the field (or `null`) optimizes every DAG (backward compatible); an explicit empty list (`[]`) whitelists nothing and disables optimization for all DAGs. A non-list value or an undeterminable current DAG falls back to the original job as a safe default.
+
 ## [1.0.1] - 2026-06-26
 
 ### Added
