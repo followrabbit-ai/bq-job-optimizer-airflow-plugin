@@ -88,6 +88,13 @@ jobs:
         env:
           AIRFLOW_HOME: ${{ github.workspace }}/airflow_home
 
+      - name: Run DAG whitelist test
+        run: |
+          export AIRFLOW_HOME=$(pwd)/airflow_home
+          python bq-job-optimizer-airflow-2/test_dag_whitelist.py
+        env:
+          AIRFLOW_HOME: ${{ github.workspace }}/airflow_home
+
       - name: Run plugin optimization tests
         run: |
           export AIRFLOW_HOME=$(pwd)/airflow_home

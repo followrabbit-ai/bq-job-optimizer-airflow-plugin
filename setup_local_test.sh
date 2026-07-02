@@ -144,6 +144,9 @@ airflow variables set rabbit_bq_optimizer_config '{
     "default_pricing_mode": "on_demand",
     "reservation_ids": [
         "project:us-central1.test-reservation"
+    ],
+    "dag_whitelist": [
+        "rabbit_optimizer_test"
     ]
 }'
 

@@ -123,6 +123,60 @@ def _load_optimizer_config() -> dict[str, Any] | None:
         return None
 
 
+def _should_optimize_for_current_dag(config: dict[str, Any]) -> bool:
+    """Honor the optional ``dag_whitelist``: only optimize jobs from listed DAGs.
+
+    Returns True when optimization should proceed (no whitelist configured, or the
+    current DAG is in it). Returns False — leaving the job untouched — when the
+    whitelist is empty, malformed, the current DAG cannot be determined, or the DAG
+    is not listed.
+
+    An absent (or ``null``) ``dag_whitelist`` means "no restriction" and optimizes
+    every DAG. An explicit empty list means "nothing is whitelisted" and optimizes
+    no DAG.
+    """
+    dag_whitelist = config.get("dag_whitelist")
+    if dag_whitelist is None:
+        return True
+
+    if not isinstance(dag_whitelist, list):
+        logging.warning(
+            "Rabbit BQ Optimizer: dag_whitelist must be a list, got %s. Using original job.",
+            type(dag_whitelist).__name__,
+        )
+        return False
+
+    if not dag_whitelist:
+        logging.info(
+            "Rabbit BQ Optimizer: dag_whitelist is empty; no DAGs are whitelisted. "
+            "Skipping optimization."
+        )
+        return False
+
+    try:
+        from airflow.operators.python import get_current_context
+
+        dag_id = get_current_context()["dag"].dag_id
+    except Exception:
+        dag_id = None
+
+    if dag_id is None:
+        logging.warning(
+            "Rabbit BQ Optimizer: dag_whitelist is set but the current DAG could not be "
+            "determined. Using original job."
+        )
+        return False
+
+    if dag_id not in dag_whitelist:
+        logging.info(
+            "Rabbit BQ Optimizer: DAG '%s' is not in dag_whitelist. Skipping optimization.",
+            dag_id,
+        )
+        return False
+
+    return True
+
+
 def _optimize(
     *,
     config: dict[str, Any],
@@ -235,6 +289,9 @@ def patch_bigquery_hook() -> None:
     def patched_insert_job(self, *, configuration: dict, **kwargs) -> BigQueryJob:
         config = _load_optimizer_config()
         if not config:
+            return original_insert_job(self, configuration=configuration, **kwargs)
+
+        if not _should_optimize_for_current_dag(config):
             return original_insert_job(self, configuration=configuration, **kwargs)
 
         operator = getattr(self, RABBIT_OPERATOR_BRIDGE_ATTR, None)

@@ -20,16 +20,16 @@ Already running an older version? See [Updating](#updating).
    - If using `requirements.txt`:
      ```txt
      rabbit-bq-job-optimizer==0.1.18
-     rabbit-bq-optimizer-airflow-plugin==1.0.1
+     rabbit-bq-optimizer-airflow-plugin==1.1.0
      ```
    - If using `constraints.txt`:
      ```txt
      rabbit-bq-job-optimizer==0.1.18
-     rabbit-bq-optimizer-airflow-plugin==1.0.1
+     rabbit-bq-optimizer-airflow-plugin==1.1.0
      ```
    - If using a custom Docker image, add to your Dockerfile:
      ```dockerfile
-     RUN pip install rabbit-bq-job-optimizer==0.1.18 rabbit-bq-optimizer-airflow-plugin==1.0.1
+     RUN pip install rabbit-bq-job-optimizer==0.1.18 rabbit-bq-optimizer-airflow-plugin==1.1.0
      ```
 
    The plugin registers via Airflow's plugin entry point — no file copy into `plugins/` is required.
@@ -59,7 +59,7 @@ Update to the new package versions in your environment dependencies:
 
 ```txt
 rabbit-bq-job-optimizer==0.1.18
-rabbit-bq-optimizer-airflow-plugin==1.0.1
+rabbit-bq-optimizer-airflow-plugin==1.1.0
 ```
 
 Apply the update using your platform's usual process, then restart Airflow components (including the triggerer if you use deferrable `BigQueryInsertJobOperator`). Your `rabbit_api` connection, `rabbit_bq_optimizer_config` variable, and DAGs are unchanged. If optimization fails, the plugin still submits the original job (fail-open).
@@ -120,6 +120,7 @@ The remaining optimizer configuration stays in an Airflow variable. Create a JSO
 - `enabled` (required): Must be `true` to run optimization. If omitted, `false`, or the variable is not set, each BigQuery submit bypasses optimization (no API call). Takes effect on the next job without restarting Airflow.
 - `default_pricing_mode` (required when `enabled` is `true`): The default pricing mode for jobs. Must be one of: `"on_demand"` or `"slot_based"`
 - `reservation_ids` (required when `enabled` is `true`): List of reservation IDs in the format "project:region.reservation-name"
+- `dag_whitelist` (optional): List of DAG IDs to optimize. When omitted (or `null`), all DAGs are optimized. When set to a list, only BigQuery jobs from matching DAGs are optimized; all others pass through unmodified — and an **empty list (`[]`) means nothing is whitelisted, so no DAG is optimized**. Must be a JSON list; any other type is ignored and optimization is skipped as a safe fallback.
 
 ### Setting the Configuration
 
@@ -133,9 +134,15 @@ airflow variables set rabbit_bq_optimizer_config '{
     "reservation_ids": [
         "project:region.reservation-name1",
         "project:region.reservation-name2"
+    ],
+    "dag_whitelist": [
+        "my_etl_dag",
+        "my_analytics_dag"
     ]
 }'
 ```
+
+   Omit `dag_whitelist` to optimize all DAGs. Setting it to an empty list (`[]`) whitelists nothing and disables optimization for every DAG.
 
 2. Through the Airflow UI:
    - Go to Admin -> Variables
@@ -208,6 +215,18 @@ A setup script `setup_local_test.sh` is provided in the root directory to help y
    - The plugin intercepts BigQuery jobs
    - The Rabbit optimization API is called with connection credentials
    - The optimized configuration is used
+
+   **Test DAG whitelist filtering:**
+   ```bash
+   source venv/bin/activate
+   export AIRFLOW_HOME=$(pwd)/airflow_home
+   cd bq-job-optimizer-airflow-2
+   python test_dag_whitelist.py
+   ```
+   This verifies the optional `dag_whitelist` feature:
+   - Optimization runs for all DAGs when whitelist is absent or empty
+   - Only whitelisted DAGs are optimized when the list is set
+   - Safe fallback (skips optimization) when whitelist is set but Airflow context is unavailable
 
    **Test plugin optimization (unit, no real BQ):**
    ```bash
