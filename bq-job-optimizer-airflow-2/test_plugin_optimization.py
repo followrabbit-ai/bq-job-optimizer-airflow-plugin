@@ -381,6 +381,88 @@ class TestPluginOptimization(unittest.TestCase):
         optimization_config = mock_client.optimize_job.call_args.kwargs["enabledOptimizations"][0]
         self.assertEqual(optimization_config.config["reservationIds"], [])
 
+    def test_statement_level_flag_forwarded_to_optimizer(self):
+        import importlib
+
+        import rabbit_bq_optimizer_plugin as plugin_module
+        from airflow.models import Variable
+        from airflow.providers.google.cloud.hooks.bigquery import BigQueryHook
+
+        importlib.reload(plugin_module)
+
+        def fake_bq_submit(self, *, configuration, **kwargs):
+            return MagicMock(job_id="mock-job-stmt-level")
+
+        BigQueryHook.insert_job = fake_bq_submit
+
+        mock_client = MagicMock()
+        mock_client.optimize_job.return_value = self._mock_optimizer_response(pool_project=None)
+
+        with (
+            patch.object(
+                Variable,
+                "get",
+                return_value={"enabled": True, "default_pricing_mode": "slot_based", "statement_level": True},
+            ),
+            patch.object(
+                plugin_module,
+                "_load_rabbit_credentials",
+                return_value={"api_key": "k", "base_url": None},
+            ),
+            patch.object(plugin_module, "RabbitBQJobOptimizer", return_value=mock_client),
+        ):
+            plugin_module.patch_bigquery_hook()
+
+            hook = BigQueryHook(gcp_conn_id="google_cloud_default")
+            hook.insert_job(
+                configuration={"query": {"query": "SELECT 1; SELECT 2", "useLegacySql": False}},
+                project_id=SOURCE_PROJECT,
+            )
+
+        optimization_config = mock_client.optimize_job.call_args.kwargs["enabledOptimizations"][0]
+        self.assertTrue(optimization_config.config.get("statementLevel"))
+
+    def test_statement_level_absent_when_not_configured(self):
+        import importlib
+
+        import rabbit_bq_optimizer_plugin as plugin_module
+        from airflow.models import Variable
+        from airflow.providers.google.cloud.hooks.bigquery import BigQueryHook
+
+        importlib.reload(plugin_module)
+
+        def fake_bq_submit(self, *, configuration, **kwargs):
+            return MagicMock(job_id="mock-job-no-stmt-level")
+
+        BigQueryHook.insert_job = fake_bq_submit
+
+        mock_client = MagicMock()
+        mock_client.optimize_job.return_value = self._mock_optimizer_response(pool_project=None)
+
+        with (
+            patch.object(
+                Variable,
+                "get",
+                return_value={"enabled": True, "default_pricing_mode": "slot_based"},
+            ),
+            patch.object(
+                plugin_module,
+                "_load_rabbit_credentials",
+                return_value={"api_key": "k", "base_url": None},
+            ),
+            patch.object(plugin_module, "RabbitBQJobOptimizer", return_value=mock_client),
+        ):
+            plugin_module.patch_bigquery_hook()
+
+            hook = BigQueryHook(gcp_conn_id="google_cloud_default")
+            hook.insert_job(
+                configuration={"query": {"query": "SELECT 1", "useLegacySql": False}},
+                project_id=SOURCE_PROJECT,
+            )
+
+        optimization_config = mock_client.optimize_job.call_args.kwargs["enabledOptimizations"][0]
+        self.assertNotIn("statementLevel", optimization_config.config)
+
     def test_disabled_via_enabled_false_skips_optimizer(self):
         import importlib
 
