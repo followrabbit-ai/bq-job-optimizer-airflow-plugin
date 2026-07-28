@@ -253,7 +253,7 @@ A setup script `setup_local_test.sh` is provided in the root directory to help y
 
 2. **Variable setup**
    - Set the `rabbit_bq_optimizer_config` variable using the sample JSON (without the API key).
-   - Include at least one reservation ID and confirm the `default_pricing_mode` is valid.
+   - Confirm `default_pricing_mode` is valid. For `"on_demand"`, include at least one reservation ID.
 
 3. **DAG validation**
    - Deploy the plugin file to `$AIRFLOW_HOME/plugins`.
@@ -329,7 +329,7 @@ Optimized jobs include labels you can query in BigQuery
 The plugin includes comprehensive error handling for:
 - Missing or invalid configuration
 - Missing required fields
-- Empty reservation IDs list
+- Empty reservation IDs list when `default_pricing_mode` is `"on_demand"`
 - API errors
 
 In all error cases, the plugin will log a warning and proceed with the original job configuration.
