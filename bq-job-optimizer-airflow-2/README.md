@@ -119,7 +119,7 @@ The remaining optimizer configuration stays in an Airflow variable. Create a JSO
 
 - `enabled` (required): Must be `true` to run optimization. If omitted, `false`, or the variable is not set, each BigQuery submit bypasses optimization (no API call). Takes effect on the next job without restarting Airflow.
 - `default_pricing_mode` (required when `enabled` is `true`): The default pricing mode for jobs. Must be one of: `"on_demand"` or `"slot_based"`
-- `reservation_ids` (required when `enabled` is `true`): List of reservation IDs in the format "project:region.reservation-name"
+- `reservation_ids` (required when `default_pricing_mode` is `"on_demand"`): List of reservation IDs in the format "project:region.reservation-name". On-demand routing needs at least one reservation to compare against; missing or empty fails validation and the job submits unoptimized. When `default_pricing_mode` is `"slot_based"`, this field is optional (defaults to `[]`).
 - `dag_whitelist` (optional): List of DAG IDs to optimize. When omitted (or `null`), all DAGs are optimized. When set to a list, only BigQuery jobs from matching DAGs are optimized; all others pass through unmodified — and an **empty list (`[]`) means nothing is whitelisted, so no DAG is optimized**. Must be a JSON list; any other type is ignored and optimization is skipped as a safe fallback.
 
 ### Setting the Configuration
