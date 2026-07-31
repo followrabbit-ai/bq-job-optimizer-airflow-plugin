@@ -38,8 +38,8 @@ RABBIT_API_CONN_ID = "rabbit_api"
 RABBIT_API_BASE_URL_EXTRA_KEY = "api_base_url"
 
 # Identifies this plugin (name + version) to the optimizer via the client library's X-Rabbit-Client
-# header, so optimizer-side diagnostics can attribute traffic per client and version. Keep in sync with
-# setup.py.
+# header, so optimizer-side diagnostics can attribute traffic per client and version. Keep in sync
+# with setup.py.
 PLUGIN_VERSION = "1.1.2"
 RABBIT_CLIENT_INFO = f"rabbit-bq-optimizer-airflow-plugin/{PLUGIN_VERSION}"
 
@@ -216,8 +216,11 @@ def _optimize(
     try:
         client = RabbitBQJobOptimizer(**client_kwargs)
     except TypeError:
-        # Older client library without client_info support — keep working without the identity header.
-        client = RabbitBQJobOptimizer(**{k: v for k, v in client_kwargs.items() if k != "client_info"})
+        # Older client library without client_info support — keep working without the identity
+        # header.
+        client = RabbitBQJobOptimizer(
+            **{k: v for k, v in client_kwargs.items() if k != "client_info"}
+        )
 
     optimize_kwargs: dict[str, Any] = {
         "configuration": {"configuration": configuration},
@@ -256,21 +259,23 @@ def _optimize(
 
 def _optimized_query_was_rewritten(original: dict[str, Any], optimized: dict[str, Any]) -> bool:
     """True when the optimizer changed the query TEXT (statement-level routing injects per-statement
-    ``SET @@reservation``). A whole-job reservation change leaves the query text untouched, so there is
-    nothing to validate in that case."""
+    ``SET @@reservation``). A whole-job reservation change leaves the query text untouched, so there
+    is nothing to validate in that case."""
     new_sql = ((optimized or {}).get("query") or {}).get("query")
     old_sql = ((original or {}).get("query") or {}).get("query")
     return isinstance(new_sql, str) and new_sql != old_sql
 
 
-def _rewritten_query_dry_run_ok(hook, optimized: dict[str, Any], source_project: str | None) -> bool:
+def _rewritten_query_dry_run_ok(
+    hook, optimized: dict[str, Any], source_project: str | None
+) -> bool:
     """Validate a server-rewritten query with the CUSTOMER's own credentials before submitting it.
 
     The optimizer rewrites SQL for statement-level routing but cannot dry-run against the customer's
-    tables. We do it here — the client holds the full query text (no INFORMATION_SCHEMA truncation) and
-    the customer's BigQuery credentials — via a dry-run. On any failure we return False so the caller
-    submits the ORIGINAL query, which is exactly the un-optimized baseline: worst case is a missed
-    optimization, never a broken job.
+    tables. We do it here — the client holds the full query text (no INFORMATION_SCHEMA truncation)
+    and the customer's BigQuery credentials — via a dry-run. On any failure we return False so the
+    caller submits the ORIGINAL query, which is exactly the un-optimized baseline: worst case is a
+    missed optimization, never a broken job.
     """
     try:
         from google.cloud import bigquery
@@ -286,7 +291,8 @@ def _rewritten_query_dry_run_ok(hook, optimized: dict[str, Any], source_project:
         return True
     except Exception as exc:
         logging.warning(
-            "Rabbit BQ Optimizer: dry-run of the rewritten query failed (%s); submitting the original job.",
+            "Rabbit BQ Optimizer: dry-run of the rewritten query failed (%s); submitting the "
+            "original job.",
             exc,
         )
         return False
@@ -367,9 +373,9 @@ def patch_bigquery_hook() -> None:
             operator_bridge_active=operator is not None,
         )
 
-        # If the optimizer rewrote the query text (statement-level routing), dry-run the rewrite with the
-        # customer's own credentials before submitting. On failure, fall back to the original job here —
-        # before any operator state is mutated below.
+        # If the optimizer rewrote the query text (statement-level routing), dry-run the rewrite
+        # with the customer's own credentials before submitting. On failure, fall back to the
+        # original job here — before any operator state is mutated below.
         if _optimized_query_was_rewritten(configuration, optimized):
             source_project = _resolve_source_project(project_id=kwargs.get("project_id"), hook=self)
             if not _rewritten_query_dry_run_ok(self, optimized, source_project):
