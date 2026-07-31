@@ -11,6 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 - Optional `debug` field on `rabbit_bq_optimizer_config`. When `true`, fail-open paths log a full traceback (`exc_info`).
+- Fail-open warnings include safe diagnostic context: selected config fields and a masked Rabbit API key (first/last 3 characters + length).
 
 ## [1.1.0] - 2026-06-30
 

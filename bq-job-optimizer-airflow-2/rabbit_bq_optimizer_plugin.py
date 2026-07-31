@@ -45,8 +45,56 @@ def _as_bool(value: Any) -> bool:
     return bool(value)
 
 
-def _log_failure(message: str, exc: BaseException, *, debug: bool) -> None:
+def _mask_secret(value: str | None) -> str:
+    """Mask a secret for logs: first/last 3 chars only (or fully masked if short)."""
+    if value is None:
+        return "<unset>"
+    if not value:
+        return "<empty>"
+    length = len(value)
+    if length <= 6:
+        masked = "*" * length
+    else:
+        masked = f"{value[:3]}...{value[-3:]}"
+    return f"{masked} (len={length})"
+
+
+def _failure_context(
+    *,
+    config: dict[str, Any] | None = None,
+    api_key: str | None = None,
+    base_url: str | None = None,
+) -> str:
+    """Compact, safe context for fail-open warnings (no full secrets)."""
+    parts: list[str] = []
+    if config is not None:
+        parts.append(
+            "config={"
+            f"default_pricing_mode={config.get('default_pricing_mode')!r}, "
+            f"reservation_ids={config.get('reservation_ids')!r}, "
+            f"dag_whitelist={config.get('dag_whitelist')!r}, "
+            f"debug={config.get('debug')!r}"
+            "}"
+        )
+    if api_key is not None:
+        parts.append(f"rabbit_api_key={_mask_secret(api_key)}")
+        parts.append(f"api_base_url={base_url!r}")
+    return " ".join(parts)
+
+
+def _log_failure(
+    message: str,
+    exc: BaseException,
+    *,
+    debug: bool,
+    config: dict[str, Any] | None = None,
+    api_key: str | None = None,
+    base_url: str | None = None,
+) -> None:
     """Log a fail-open warning; include traceback when debug is on."""
+    context = _failure_context(config=config, api_key=api_key, base_url=base_url)
+    if context:
+        message = f"{message} {context}"
     logging.warning(message, exc, exc_info=debug)
 
 
@@ -204,6 +252,7 @@ def _optimize(
             f"'{RABBIT_API_CONN_ID}': %s. Using original job.",
             exc,
             debug=debug,
+            config=config,
         )
         return None
 
@@ -235,6 +284,9 @@ def _optimize(
             "Rabbit BQ Optimizer: optimize_job failed: %s. Using original job.",
             exc,
             debug=debug,
+            config=config,
+            api_key=credentials["api_key"],
+            base_url=credentials.get("base_url"),
         )
         return None
 
@@ -341,6 +393,7 @@ def patch_bigquery_hook() -> None:
                 "Rabbit BQ Optimizer: optimized submit failed: %s. Using original job.",
                 exc,
                 debug=config["debug"],
+                config=config,
             )
             # Restore operator state so poll/defer track the source project, not the pool.
             if operator is not None:
