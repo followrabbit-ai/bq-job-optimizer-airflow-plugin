@@ -13,6 +13,7 @@ original ``insert_job`` runs with no API call.
 
 from __future__ import annotations
 
+import json
 import logging
 import os
 from typing import Any
@@ -68,14 +69,9 @@ def _failure_context(
     """Compact, safe context for fail-open warnings (no full secrets)."""
     parts: list[str] = []
     if config is not None:
-        parts.append(
-            "config={"
-            f"default_pricing_mode={config.get('default_pricing_mode')!r}, "
-            f"reservation_ids={config.get('reservation_ids')!r}, "
-            f"dag_whitelist={config.get('dag_whitelist')!r}, "
-            f"debug={config.get('debug')!r}"
-            "}"
-        )
+        # Prefer the Airflow Variable payload as loaded (not our normalized copy).
+        raw = config.get("_raw", config)
+        parts.append(f"config={json.dumps(raw, default=str)}")
     if api_key is not None:
         parts.append(f"rabbit_api_key={_mask_secret(api_key)}")
         parts.append(f"api_base_url={base_url!r}")
@@ -174,6 +170,8 @@ def _load_optimizer_config() -> dict[str, Any] | None:
             raise ValueError("on_demand default with no reservation_ids")
         config["reservation_ids"] = reservation_ids
         config["debug"] = _as_bool(config.get("debug"))
+        # Keep the Variable payload as loaded for fail-open diagnostics.
+        config["_raw"] = raw
         return config
     except (KeyError, ValueError) as exc:
         # Missing variable, bad JSON, or failed validation above.
