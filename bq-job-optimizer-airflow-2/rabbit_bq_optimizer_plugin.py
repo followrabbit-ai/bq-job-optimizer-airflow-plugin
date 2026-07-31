@@ -38,6 +38,18 @@ RABBIT_API_CONN_ID = "rabbit_api"
 RABBIT_API_BASE_URL_EXTRA_KEY = "api_base_url"
 
 
+def _as_bool(value: Any) -> bool:
+    """Parse config booleans; accept JSON bools and common true/false strings."""
+    if isinstance(value, str):
+        return value.strip().lower() in ("true", "1", "yes", "on")
+    return bool(value)
+
+
+def _log_failure(message: str, exc: BaseException, *, debug: bool) -> None:
+    """Log a fail-open warning; include traceback when debug is on."""
+    logging.warning(message, exc, exc_info=debug)
+
+
 def _load_rabbit_credentials() -> dict[str, str | None]:
     try:
         connection = BaseHook.get_connection(RABBIT_API_CONN_ID)
@@ -92,10 +104,7 @@ def _load_optimizer_config() -> dict[str, Any] | None:
             )
             return None
 
-        enabled = raw["enabled"]
-        if isinstance(enabled, str):
-            enabled = enabled.strip().lower() in ("true", "1", "yes", "on")
-        if not enabled:
+        if not _as_bool(raw["enabled"]):
             logging.info(
                 "Rabbit BQ Optimizer: disabled via %s (enabled=false). Using original job.",
                 OPTIMIZER_VARIABLE,
@@ -116,6 +125,7 @@ def _load_optimizer_config() -> dict[str, Any] | None:
         if config["default_pricing_mode"] == "on_demand" and not reservation_ids:
             raise ValueError("on_demand default with no reservation_ids")
         config["reservation_ids"] = reservation_ids
+        config["debug"] = _as_bool(config.get("debug"))
         return config
     except (KeyError, ValueError) as exc:
         # Missing variable, bad JSON, or failed validation above.
@@ -185,14 +195,15 @@ def _optimize(
     project_id: str | None,
 ) -> tuple[dict[str, Any], str | None] | None:
     """Returns (optimized_configuration, pool_billing_project) or None."""
+    debug = config["debug"]
     try:
         credentials = _load_rabbit_credentials()
     except Exception as exc:
-        logging.warning(
-            "Rabbit BQ Optimizer: failed to load Rabbit API connection '%s': %s. "
-            "Using original job.",
-            RABBIT_API_CONN_ID,
+        _log_failure(
+            "Rabbit BQ Optimizer: failed to load Rabbit API connection "
+            f"'{RABBIT_API_CONN_ID}': %s. Using original job.",
             exc,
+            debug=debug,
         )
         return None
 
@@ -220,7 +231,11 @@ def _optimize(
     try:
         result = client.optimize_job(**optimize_kwargs)
     except Exception as exc:
-        logging.warning("Rabbit BQ Optimizer: optimize_job failed: %s. Using original job.", exc)
+        _log_failure(
+            "Rabbit BQ Optimizer: optimize_job failed: %s. Using original job.",
+            exc,
+            debug=debug,
+        )
         return None
 
     logging.debug("Rabbit BQ Optimizer: optimization result=%s", result)
@@ -322,8 +337,10 @@ def patch_bigquery_hook() -> None:
         try:
             return original_insert_job(self, configuration=optimized, **submit_kwargs)
         except Exception as exc:
-            logging.warning(
-                "Rabbit BQ Optimizer: optimized submit failed: %s. Using original job.", exc
+            _log_failure(
+                "Rabbit BQ Optimizer: optimized submit failed: %s. Using original job.",
+                exc,
+                debug=config["debug"],
             )
             # Restore operator state so poll/defer track the source project, not the pool.
             if operator is not None:
