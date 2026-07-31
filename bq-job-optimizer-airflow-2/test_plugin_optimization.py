@@ -402,7 +402,11 @@ class TestPluginOptimization(unittest.TestCase):
             patch.object(
                 Variable,
                 "get",
-                return_value={"enabled": True, "default_pricing_mode": "slot_based", "statement_level": True},
+                return_value={
+                    "enabled": True,
+                    "default_pricing_mode": "slot_based",
+                    "statement_level": True,
+                },
             ),
             patch.object(
                 plugin_module,
