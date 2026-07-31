@@ -8,5 +8,6 @@
     "dag_whitelist": [
         "my_etl_dag",
         "my_analytics_dag"
-    ]
+    ],
+    "debug": false
 }
