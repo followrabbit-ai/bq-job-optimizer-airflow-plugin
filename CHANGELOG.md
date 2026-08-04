@@ -7,7 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [1.1.3]
+## [1.1.3] - 2026-08-04
 
 ### Added
 - **Dry-run guard for statement-level rewrites.** When the optimizer rewrites the query text
