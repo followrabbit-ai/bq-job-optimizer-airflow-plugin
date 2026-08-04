@@ -14,6 +14,7 @@ original ``insert_job`` runs with no API call.
 from __future__ import annotations
 
 import importlib.metadata
+import json
 import logging
 import os
 from typing import Any
@@ -47,6 +48,61 @@ try:
 except importlib.metadata.PackageNotFoundError:
     PLUGIN_VERSION = "unknown"
 RABBIT_CLIENT_INFO = f"rabbit-bq-optimizer-airflow-plugin/{PLUGIN_VERSION}"
+
+
+def _as_bool(value: Any) -> bool:
+    """Parse config booleans; accept JSON bools and common true/false strings."""
+    if isinstance(value, str):
+        return value.strip().lower() in ("true", "1", "yes", "on")
+    return bool(value)
+
+
+def _mask_secret(value: str | None) -> str:
+    """Mask a secret for logs: first/last 3 chars only (or fully masked if short)."""
+    if value is None:
+        return "<unset>"
+    if not value:
+        return "<empty>"
+    length = len(value)
+    if length <= 6:
+        masked = "*" * length
+    else:
+        masked = f"{value[:3]}...{value[-3:]}"
+    return f"{masked} (len={length})"
+
+
+def _failure_context(
+    *,
+    config: dict[str, Any] | None = None,
+    api_key: str | None = None,
+    base_url: str | None = None,
+) -> str:
+    """Compact, safe context for fail-open warnings (no full secrets)."""
+    parts: list[str] = []
+    if config is not None:
+        # Prefer the Airflow Variable payload as loaded (not our normalized copy).
+        raw = config.get("_raw", config)
+        parts.append(f"config={json.dumps(raw, default=str)}")
+    if api_key is not None:
+        parts.append(f"rabbit_api_key={_mask_secret(api_key)}")
+        parts.append(f"api_base_url={base_url!r}")
+    return " ".join(parts)
+
+
+def _log_failure(
+    message: str,
+    exc: BaseException,
+    *,
+    debug: bool,
+    config: dict[str, Any] | None = None,
+    api_key: str | None = None,
+    base_url: str | None = None,
+) -> None:
+    """Log a fail-open warning; include traceback when debug is on."""
+    context = _failure_context(config=config, api_key=api_key, base_url=base_url)
+    if context:
+        message = f"{message} {context}"
+    logging.warning(message, exc, exc_info=debug)
 
 
 def _load_rabbit_credentials() -> dict[str, str | None]:
@@ -103,10 +159,7 @@ def _load_optimizer_config() -> dict[str, Any] | None:
             )
             return None
 
-        enabled = raw["enabled"]
-        if isinstance(enabled, str):
-            enabled = enabled.strip().lower() in ("true", "1", "yes", "on")
-        if not enabled:
+        if not _as_bool(raw["enabled"]):
             logging.info(
                 "Rabbit BQ Optimizer: disabled via %s (enabled=false). Using original job.",
                 OPTIMIZER_VARIABLE,
@@ -130,10 +183,10 @@ def _load_optimizer_config() -> dict[str, Any] | None:
         # Statement-level routing is opt-in. The plugin submits the server-rewritten query verbatim,
         # so enabling it here is safe; it also requires the tenant's
         # bq_dynamic_pricing_statement_level feature flag.
-        statement_level = config.get("statement_level", False)
-        if isinstance(statement_level, str):
-            statement_level = statement_level.strip().lower() in ("true", "1", "yes", "on")
-        config["statement_level"] = bool(statement_level)
+        config["statement_level"] = _as_bool(config.get("statement_level"))
+        config["debug"] = _as_bool(config.get("debug"))
+        # Keep the Variable payload as loaded for fail-open diagnostics.
+        config["_raw"] = raw
         return config
     except (KeyError, ValueError) as exc:
         # Missing variable, bad JSON, or failed validation above.
@@ -203,14 +256,16 @@ def _optimize(
     project_id: str | None,
 ) -> tuple[dict[str, Any], str | None] | None:
     """Returns (optimized_configuration, pool_billing_project) or None."""
+    debug = config["debug"]
     try:
         credentials = _load_rabbit_credentials()
     except Exception as exc:
-        logging.warning(
-            "Rabbit BQ Optimizer: failed to load Rabbit API connection '%s': %s. "
-            "Using original job.",
-            RABBIT_API_CONN_ID,
+        _log_failure(
+            "Rabbit BQ Optimizer: failed to load Rabbit API connection "
+            f"'{RABBIT_API_CONN_ID}': %s. Using original job.",
             exc,
+            debug=debug,
+            config=config,
         )
         return None
 
@@ -246,7 +301,14 @@ def _optimize(
     try:
         result = client.optimize_job(**optimize_kwargs)
     except Exception as exc:
-        logging.warning("Rabbit BQ Optimizer: optimize_job failed: %s. Using original job.", exc)
+        _log_failure(
+            "Rabbit BQ Optimizer: optimize_job failed: %s. Using original job.",
+            exc,
+            debug=debug,
+            config=config,
+            api_key=credentials["api_key"],
+            base_url=credentials.get("base_url"),
+        )
         return None
 
     logging.debug("Rabbit BQ Optimizer: optimization result=%s", result)
@@ -398,8 +460,11 @@ def patch_bigquery_hook() -> None:
         try:
             return original_insert_job(self, configuration=optimized, **submit_kwargs)
         except Exception as exc:
-            logging.warning(
-                "Rabbit BQ Optimizer: optimized submit failed: %s. Using original job.", exc
+            _log_failure(
+                "Rabbit BQ Optimizer: optimized submit failed: %s. Using original job.",
+                exc,
+                debug=config["debug"],
+                config=config,
             )
             # Restore operator state so poll/defer track the source project, not the pool.
             if operator is not None:

@@ -7,7 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [1.1.2]
+## [1.1.3]
 
 ### Added
 - **Dry-run guard for statement-level rewrites.** When the optimizer rewrites the query text
@@ -18,6 +18,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Client identity header.** Sends `x-rabbit-client: rabbit-bq-optimizer-airflow-plugin/<version> …` on
   every optimizer request (requires `rabbit-bq-job-optimizer>=0.1.19`) so optimizer-side diagnostics can
   attribute traffic per client and version.
+
+## [1.1.2] - 2026-07-30
+
+### Added
+- Optional `debug` field on `rabbit_bq_optimizer_config`. When `true`, fail-open paths log a full traceback (`exc_info`).
+- Fail-open warnings include safe diagnostic context: selected config fields and a masked Rabbit API key (first/last 3 characters + length).
 
 ## [1.1.0] - 2026-06-30
 
