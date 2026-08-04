@@ -169,6 +169,10 @@ def _load_optimizer_config() -> dict[str, Any] | None:
         if config["default_pricing_mode"] == "on_demand" and not reservation_ids:
             raise ValueError("on_demand default with no reservation_ids")
         config["reservation_ids"] = reservation_ids
+        # Statement-level routing is opt-in. The plugin submits the server-rewritten query verbatim,
+        # so enabling it here is safe; it also requires the tenant's
+        # bq_dynamic_pricing_statement_level feature flag.
+        config["statement_level"] = _as_bool(config.get("statement_level"))
         config["debug"] = _as_bool(config.get("debug"))
         # Keep the Variable payload as loaded for fail-open diagnostics.
         config["_raw"] = raw
@@ -268,6 +272,7 @@ def _optimize(
                 config={
                     "defaultPricingMode": config.get("default_pricing_mode"),
                     "reservationIds": config["reservation_ids"],
+                    **({"statementLevel": True} if config.get("statement_level") else {}),
                 },
             )
         ],
