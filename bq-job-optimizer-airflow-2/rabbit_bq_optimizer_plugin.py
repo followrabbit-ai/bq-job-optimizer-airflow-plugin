@@ -13,6 +13,7 @@ original ``insert_job`` runs with no API call.
 
 from __future__ import annotations
 
+import importlib.metadata
 import logging
 import os
 from typing import Any
@@ -38,9 +39,13 @@ RABBIT_API_CONN_ID = "rabbit_api"
 RABBIT_API_BASE_URL_EXTRA_KEY = "api_base_url"
 
 # Identifies this plugin (name + version) to the optimizer via the client library's x-rabbit-client
-# header, so optimizer-side diagnostics can attribute traffic per client and version. Keep in sync
-# with setup.py.
-PLUGIN_VERSION = "1.1.2"
+# header, so optimizer-side diagnostics can attribute traffic per client and version. The version
+# comes from the installed package metadata (setup.py is the single source of truth); "unknown"
+# covers the file being copied into the plugins folder without a pip install.
+try:
+    PLUGIN_VERSION = importlib.metadata.version("rabbit-bq-optimizer-airflow-plugin")
+except importlib.metadata.PackageNotFoundError:
+    PLUGIN_VERSION = "unknown"
 RABBIT_CLIENT_INFO = f"rabbit-bq-optimizer-airflow-plugin/{PLUGIN_VERSION}"
 
 
