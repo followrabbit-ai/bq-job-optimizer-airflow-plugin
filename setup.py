@@ -2,11 +2,11 @@ from setuptools import setup
 
 setup(
     name="rabbit-bq-optimizer-airflow-plugin",
-    version="1.1.2",
+    version="1.1.3",
     py_modules=["rabbit_bq_optimizer_plugin"],
     package_dir={"": "bq-job-optimizer-airflow-2"},
     install_requires=[
-        "rabbit-bq-job-optimizer>=0.1.18",
+        "rabbit-bq-job-optimizer>=0.1.19",
     ],
     author="Rabbit Team",
     author_email="success@followrabbit.ai",
