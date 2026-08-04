@@ -15,7 +15,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   credentials before submitting. If the dry-run fails, it submits the original job instead — worst case
   is a missed optimization, never a broken job. Whole-job reservation changes (query text unchanged) are
   not dry-run.
-- **Client identity header.** Sends `X-Rabbit-Client: rabbit-bq-optimizer-airflow-plugin/<version> …` on
+- **Client identity header.** Sends `x-rabbit-client: rabbit-bq-optimizer-airflow-plugin/<version> …` on
   every optimizer request (requires `rabbit-bq-job-optimizer>=0.1.19`) so optimizer-side diagnostics can
   attribute traffic per client and version.
 

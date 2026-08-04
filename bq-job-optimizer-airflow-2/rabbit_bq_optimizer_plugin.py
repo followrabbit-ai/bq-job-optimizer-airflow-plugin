@@ -37,7 +37,7 @@ OPTIMIZER_VARIABLE = "rabbit_bq_optimizer_config"
 RABBIT_API_CONN_ID = "rabbit_api"
 RABBIT_API_BASE_URL_EXTRA_KEY = "api_base_url"
 
-# Identifies this plugin (name + version) to the optimizer via the client library's X-Rabbit-Client
+# Identifies this plugin (name + version) to the optimizer via the client library's x-rabbit-client
 # header, so optimizer-side diagnostics can attribute traffic per client and version. Keep in sync
 # with setup.py.
 PLUGIN_VERSION = "1.1.2"
