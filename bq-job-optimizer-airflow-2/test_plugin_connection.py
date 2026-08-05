@@ -85,6 +85,31 @@ def test_missing_base_url_uses_default():
         return False
 
 
+def test_non_ascii_api_key_raises_runtime_error():
+    """A key with non-ASCII characters (bad copy-paste) should fail fast with a clear error."""
+    print("\nTesting non-ASCII API key handling...")
+
+    dummy_connection = MagicMock()
+    dummy_connection.password = "길지test-key-046"
+    dummy_connection.extra_dejson = {}
+
+    with patch(
+        "rabbit_bq_optimizer_plugin.BaseHook.get_connection",
+        return_value=dummy_connection,
+    ):
+        try:
+            _load_rabbit_credentials()
+        except RuntimeError as exc:
+            if "non-ASCII" in str(exc) and dummy_connection.password not in str(exc):
+                print("✓ Non-ASCII API key raises RuntimeError without leaking the key")
+                return True
+            print(f"✗ Unexpected RuntimeError message: {exc}")
+            return False
+
+    print("✗ Expected RuntimeError for non-ASCII API key")
+    return False
+
+
 def test_missing_connection_raises_runtime_error():
     """Plugin should surface a clear RuntimeError when rabbit_api is missing."""
     print("\nTesting missing connection handling...")
@@ -124,6 +149,9 @@ if __name__ == "__main__":
         all_tests_passed = False
 
     if not test_missing_base_url_uses_default():
+        all_tests_passed = False
+
+    if not test_non_ascii_api_key_raises_runtime_error():
         all_tests_passed = False
 
     if not test_missing_connection_raises_runtime_error():

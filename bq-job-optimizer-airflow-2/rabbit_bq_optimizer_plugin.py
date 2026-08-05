@@ -119,6 +119,14 @@ def _load_rabbit_credentials() -> dict[str, str | None]:
             f"Airflow connection '{RABBIT_API_CONN_ID}' is missing the password field "
             "which must contain the Rabbit API key"
         )
+    if not api_key.isascii():
+        # Non-ASCII keys blow up later with an opaque UnicodeEncodeError when the key is
+        # sent as an HTTP header; fail fast with an actionable message instead.
+        raise RuntimeError(
+            f"Airflow connection '{RABBIT_API_CONN_ID}' password contains non-ASCII "
+            f"characters ({_mask_secret(api_key)}) — this is not a valid Rabbit API key. "
+            "Re-paste the API key into the connection's password field"
+        )
 
     extras = connection.extra_dejson or {}
     base_url = extras.get(RABBIT_API_BASE_URL_EXTRA_KEY)

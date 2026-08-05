@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- Fail fast with a clear error when the `rabbit_api` connection password contains non-ASCII
+  characters (e.g. a garbled copy-paste). Previously this surfaced as an opaque
+  `UnicodeEncodeError: 'latin-1' codec can't encode characters` from deep inside the HTTP stack
+  when the key was sent as a request header.
+
 ## [1.1.3] - 2026-08-04
 
 ### Added
