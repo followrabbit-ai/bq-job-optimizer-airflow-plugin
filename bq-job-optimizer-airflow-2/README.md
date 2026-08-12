@@ -121,7 +121,7 @@ The remaining optimizer configuration stays in an Airflow variable. Create a JSO
 - `default_pricing_mode` (required when `enabled` is `true`): The default pricing mode for jobs. Must be one of: `"on_demand"` or `"slot_based"`
 - `reservation_ids` (required when `default_pricing_mode` is `"on_demand"`): List of reservation IDs in the format "project:region.reservation-name". On-demand routing needs at least one reservation to compare against; missing or empty fails validation and the job submits unoptimized. When `default_pricing_mode` is `"slot_based"`, this field is optional (defaults to `[]`).
 - `dag_whitelist` (optional): List of DAG IDs to optimize. When omitted (or `null`), all DAGs are optimized. When set to a list, only BigQuery jobs from matching DAGs are optimized; all others pass through unmodified — and an **empty list (`[]`) means nothing is whitelisted, so no DAG is optimized**. Must be a JSON list; any other type is ignored and optimization is skipped as a safe fallback.
-- `debug` (optional): Turns on detailed error logs for troubleshooting. When the optimizer cannot change a job and falls back to the original BigQuery submit, Airflow normally shows only a short warning. Set this to `true` to also include the full Python error traceback in the task log — helpful when working with Rabbit support. Leave it unset or `false` in normal use. Default: off.
+- `debug` (optional): When `true`, fail-open paths include a full traceback, and successful optimizer calls log the API response JSON at INFO (`Rabbit BQ Optimizer: optimization result=...`). Default: off.
 
 ### Setting the Configuration
 
@@ -191,7 +191,7 @@ A setup script `setup_local_test.sh` is provided in the root directory to help y
    Check the logs for the following:
    - `Rabbit BQ Optimizer: patching BigQueryHook.insert_job` (scheduler logs at startup)
    - `Rabbit BQ Optimizer: patching BigQueryInsertJobOperator._submit_job` (scheduler logs at startup)
-   - `Rabbit BQ Optimizer: optimization result=...` at DEBUG on job submit (or failure if using dummy key/URL)
+   - `Rabbit BQ Optimizer: optimization result=...` on job submit when `debug` is true (INFO), or at DEBUG when `debug` is off (or failure if using dummy key/URL)
 
 4. **Run automated tests:**
    After setup, you can run automated tests to validate the plugin:
@@ -263,7 +263,7 @@ A setup script `setup_local_test.sh` is provided in the root directory to help y
 
 4. **Positive path (connection + variable present)**
    - Confirm in the scheduler logs at startup that the plugin logs `patching BigQueryHook.insert_job` and `patching BigQueryInsertJobOperator._submit_job`.
-   - Validate that the BigQuery job request reaches Rabbit (check Rabbit logs or enable DEBUG for `Rabbit BQ Optimizer: optimization result=...`).
+   - Validate that the BigQuery job request reaches Rabbit (check Rabbit logs, or set `"debug": true` in `rabbit_bq_optimizer_config` to see `Rabbit BQ Optimizer: optimization result=...` in the task log).
    - For a query with historical data/reservations, verify the resulting BigQuery job uses the optimized configuration.
 
 5. **Missing connection safety net**

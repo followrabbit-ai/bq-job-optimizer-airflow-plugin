@@ -16,6 +16,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+from dataclasses import asdict
 from typing import Any
 
 from airflow.exceptions import AirflowException
@@ -288,7 +289,13 @@ def _optimize(
         )
         return None
 
-    logging.debug("Rabbit BQ Optimizer: optimization result=%s", result)
+    if debug:
+        logging.info(
+            "Rabbit BQ Optimizer: optimization result=%s",
+            json.dumps(asdict(result), default=str),
+        )
+    else:
+        logging.debug("Rabbit BQ Optimizer: optimization result=%s", result)
 
     optimized = dict((result.optimizedJob or {}).get("configuration") or {})
     if source_project:
