@@ -7,10 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [1.1.3] - 2026-08-12
+## [1.1.4] - 2026-08-12
 
 ### Changed
 - When `debug` is `true`, successful optimizer calls also log the full job-optimizer API response as JSON at INFO (in addition to fail-open traceback logging).
+
+## [1.1.3] - 2026-08-04
+
+### Added
+- **Dry-run guard for statement-level rewrites.** When the optimizer rewrites the query text
+  (statement-level routing), the plugin now dry-runs the rewrite with the customer's own BigQuery
+  credentials before submitting. If the dry-run fails, it submits the original job instead — worst case
+  is a missed optimization, never a broken job. Whole-job reservation changes (query text unchanged) are
+  not dry-run.
+- **Client identity header.** Sends `x-rabbit-client: rabbit-bq-optimizer-airflow-plugin/<version> …` on
+  every optimizer request (requires `rabbit-bq-job-optimizer>=0.1.19`) so optimizer-side diagnostics can
+  attribute traffic per client and version.
 
 ## [1.1.2] - 2026-07-30
 

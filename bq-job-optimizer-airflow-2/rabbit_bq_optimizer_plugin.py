@@ -13,6 +13,7 @@ original ``insert_job`` runs with no API call.
 
 from __future__ import annotations
 
+import importlib.metadata
 import json
 import logging
 import os
@@ -38,6 +39,16 @@ POOL_ROUTING_NONE = "none"
 OPTIMIZER_VARIABLE = "rabbit_bq_optimizer_config"
 RABBIT_API_CONN_ID = "rabbit_api"
 RABBIT_API_BASE_URL_EXTRA_KEY = "api_base_url"
+
+# Identifies this plugin (name + version) to the optimizer via the client library's x-rabbit-client
+# header, so optimizer-side diagnostics can attribute traffic per client and version. The version
+# comes from the installed package metadata (setup.py is the single source of truth); "unknown"
+# covers the file being copied into the plugins folder without a pip install.
+try:
+    PLUGIN_VERSION = importlib.metadata.version("rabbit-bq-optimizer-airflow-plugin")
+except importlib.metadata.PackageNotFoundError:
+    PLUGIN_VERSION = "unknown"
+RABBIT_CLIENT_INFO = f"rabbit-bq-optimizer-airflow-plugin/{PLUGIN_VERSION}"
 
 
 def _as_bool(value: Any) -> bool:
@@ -170,6 +181,10 @@ def _load_optimizer_config() -> dict[str, Any] | None:
         if config["default_pricing_mode"] == "on_demand" and not reservation_ids:
             raise ValueError("on_demand default with no reservation_ids")
         config["reservation_ids"] = reservation_ids
+        # Statement-level routing is opt-in. The plugin submits the server-rewritten query verbatim,
+        # so enabling it here is safe; it also requires the tenant's
+        # bq_dynamic_pricing_statement_level feature flag.
+        config["statement_level"] = _as_bool(config.get("statement_level"))
         config["debug"] = _as_bool(config.get("debug"))
         # Keep the Variable payload as loaded for fail-open diagnostics.
         config["_raw"] = raw
@@ -256,10 +271,17 @@ def _optimize(
         return None
 
     source_project = _resolve_source_project(project_id=project_id, hook=hook)
-    client_kwargs = {"api_key": credentials["api_key"]}
+    client_kwargs = {"api_key": credentials["api_key"], "client_info": RABBIT_CLIENT_INFO}
     if credentials["base_url"]:
         client_kwargs["base_url"] = credentials["base_url"]
-    client = RabbitBQJobOptimizer(**client_kwargs)
+    try:
+        client = RabbitBQJobOptimizer(**client_kwargs)
+    except TypeError:
+        # Older client library without client_info support — keep working without the identity
+        # header.
+        client = RabbitBQJobOptimizer(
+            **{k: v for k, v in client_kwargs.items() if k != "client_info"}
+        )
 
     optimize_kwargs: dict[str, Any] = {
         "configuration": {"configuration": configuration},
@@ -269,6 +291,7 @@ def _optimize(
                 config={
                     "defaultPricingMode": config.get("default_pricing_mode"),
                     "reservationIds": config["reservation_ids"],
+                    **({"statementLevel": True} if config.get("statement_level") else {}),
                 },
             )
         ],
@@ -306,6 +329,47 @@ def _optimize(
     job_ref = (result.optimizedJob or {}).get("jobReference") or {}
     pool_billing_project = job_ref.get("projectId")
     return optimized, pool_billing_project
+
+
+def _optimized_query_was_rewritten(original: dict[str, Any], optimized: dict[str, Any]) -> bool:
+    """True when the optimizer changed the query TEXT (statement-level routing injects per-statement
+    ``SET @@reservation``). A whole-job reservation change leaves the query text untouched, so there
+    is nothing to validate in that case."""
+    new_sql = ((optimized or {}).get("query") or {}).get("query")
+    old_sql = ((original or {}).get("query") or {}).get("query")
+    return isinstance(new_sql, str) and new_sql != old_sql
+
+
+def _rewritten_query_dry_run_ok(
+    hook, optimized: dict[str, Any], source_project: str | None
+) -> bool:
+    """Validate a server-rewritten query with the CUSTOMER's own credentials before submitting it.
+
+    The optimizer rewrites SQL for statement-level routing but cannot dry-run against the customer's
+    tables. We do it here — the client holds the full query text (no INFORMATION_SCHEMA truncation)
+    and the customer's BigQuery credentials — via a dry-run. On any failure we return False so the
+    caller submits the ORIGINAL query, which is exactly the un-optimized baseline: worst case is a
+    missed optimization, never a broken job.
+    """
+    try:
+        from google.cloud import bigquery
+
+        sql = (optimized.get("query") or {}).get("query")
+        project = source_project or getattr(hook, "project_id", None)
+        client = hook.get_client(project_id=project)
+        client.query(
+            sql,
+            project=project,
+            job_config=bigquery.QueryJobConfig(dry_run=True, use_query_cache=False),
+        )
+        return True
+    except Exception as exc:
+        logging.warning(
+            "Rabbit BQ Optimizer: dry-run of the rewritten query failed (%s); submitting the "
+            "original job.",
+            exc,
+        )
+        return False
 
 
 def _stamp_pool_routing_labels(
@@ -382,6 +446,15 @@ def patch_bigquery_hook() -> None:
             pool_billing_project=pool_billing_project,
             operator_bridge_active=operator is not None,
         )
+
+        # If the optimizer rewrote the query text (statement-level routing), dry-run the rewrite
+        # with the customer's own credentials before submitting. On failure, fall back to the
+        # original job here — before any operator state is mutated below.
+        if _optimized_query_was_rewritten(configuration, optimized):
+            source_project = _resolve_source_project(project_id=kwargs.get("project_id"), hook=self)
+            if not _rewritten_query_dry_run_ok(self, optimized, source_project):
+                return original_insert_job(self, configuration=configuration, **kwargs)
+
         submit_kwargs = dict(kwargs)
         original_operator_config = operator.configuration if operator is not None else None
         original_operator_project = operator.project_id if operator is not None else None
