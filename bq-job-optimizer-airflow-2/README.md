@@ -19,17 +19,17 @@ Already running an older version? See [Updating](#updating).
 1. Add the plugin and client to your Airflow environment:
    - If using `requirements.txt`:
      ```txt
-     rabbit-bq-job-optimizer==0.1.18
-     rabbit-bq-optimizer-airflow-plugin==1.1.2
+     rabbit-bq-job-optimizer==0.1.19
+     rabbit-bq-optimizer-airflow-plugin==1.1.4
      ```
    - If using `constraints.txt`:
      ```txt
-     rabbit-bq-job-optimizer==0.1.18
-     rabbit-bq-optimizer-airflow-plugin==1.1.2
+     rabbit-bq-job-optimizer==0.1.19
+     rabbit-bq-optimizer-airflow-plugin==1.1.4
      ```
    - If using a custom Docker image, add to your Dockerfile:
      ```dockerfile
-     RUN pip install rabbit-bq-job-optimizer==0.1.18 rabbit-bq-optimizer-airflow-plugin==1.1.2
+     RUN pip install rabbit-bq-job-optimizer==0.1.19 rabbit-bq-optimizer-airflow-plugin==1.1.4
      ```
 
    The plugin registers via Airflow's plugin entry point — no file copy into `plugins/` is required.
@@ -41,7 +41,7 @@ Already running an older version? See [Updating](#updating).
 1. Add the Python client to your Airflow environment dependencies:
 
    ```txt
-   rabbit-bq-job-optimizer==0.1.18
+   rabbit-bq-job-optimizer==0.1.19
    ```
 
 2. Copy the plugin file into your Airflow plugins directory:
@@ -58,8 +58,8 @@ Already running an older version? See [Updating](#updating).
 Update to the new package versions in your environment dependencies:
 
 ```txt
-rabbit-bq-job-optimizer==0.1.18
-rabbit-bq-optimizer-airflow-plugin==1.1.2
+rabbit-bq-job-optimizer==0.1.19
+rabbit-bq-optimizer-airflow-plugin==1.1.4
 ```
 
 Apply the update using your platform's usual process, then restart Airflow components (including the triggerer if you use deferrable `BigQueryInsertJobOperator`). Your `rabbit_api` connection, `rabbit_bq_optimizer_config` variable, and DAGs are unchanged. If optimization fails, the plugin still submits the original job (fail-open).
