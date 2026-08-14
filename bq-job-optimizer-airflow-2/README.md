@@ -121,6 +121,7 @@ The remaining optimizer configuration stays in an Airflow variable. Create a JSO
 - `default_pricing_mode` (required when `enabled` is `true`): The default pricing mode for jobs. Must be one of: `"on_demand"` or `"slot_based"`
 - `reservation_ids` (required when `default_pricing_mode` is `"on_demand"`): List of reservation IDs in the format "project:region.reservation-name". On-demand routing needs at least one reservation to compare against; missing or empty fails validation and the job submits unoptimized. When `default_pricing_mode` is `"slot_based"`, this field is optional (defaults to `[]`).
 - `dag_whitelist` (optional): List of DAG IDs to optimize. When omitted (or `null`), all DAGs are optimized. When set to a list, only BigQuery jobs from matching DAGs are optimized; all others pass through unmodified — and an **empty list (`[]`) means nothing is whitelisted, so no DAG is optimized**. Must be a JSON list; any other type is ignored and optimization is skipped as a safe fallback.
+- `statement_level` (optional): When `true`, opts multi-statement SCRIPT jobs into **per-statement reservation routing** — each statement of the script is routed to whichever is cheaper (a reservation or pay-as-you-go) instead of a single setting for the whole script. Also requires the tenant's `bq_dynamic_pricing_statement_level` feature flag, which is enabled by Rabbit; until it is on, setting this is a safe no-op. Before submitting a rewritten script, the plugin dry-runs it with your own BigQuery credentials and, on any error, submits the original job unchanged — worst case is a missed optimization, never a broken job. Default: off.
 - `debug` (optional): When `true`, fail-open paths include a full traceback, and successful optimizer calls log the API response JSON at INFO (`Rabbit BQ Optimizer: optimization result=...`). Default: off.
 
 ### Setting the Configuration
@@ -139,7 +140,8 @@ airflow variables set rabbit_bq_optimizer_config '{
     "dag_whitelist": [
         "my_etl_dag",
         "my_analytics_dag"
-    ]
+    ],
+    "statement_level": true
 }'
 ```
 
