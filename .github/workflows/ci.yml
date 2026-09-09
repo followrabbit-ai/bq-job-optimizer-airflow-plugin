@@ -35,11 +35,23 @@ jobs:
           ruff check bq-job-optimizer-airflow-2/*.py
 
   test:
-    name: Run Tests
+    name: Airflow ${{ matrix.airflow-version }} / Python ${{ matrix.python-version }}
     runs-on: ubuntu-latest
     strategy:
+      # Report every combination rather than cancelling siblings on first failure.
+      fail-fast: false
       matrix:
-        python-version: ['3.9', '3.10', '3.11', '3.12']
+        include:
+          # Baseline Airflow, full Python fan-out (unchanged coverage).
+          - { airflow-version: '2.9.1', python-version: '3.9' }
+          - { airflow-version: '2.9.1', python-version: '3.10' }
+          - { airflow-version: '2.9.1', python-version: '3.11' }
+          - { airflow-version: '2.9.1', python-version: '3.12' }
+          # Newer Airflow 2.x. One Python each keeps the matrix cheap; these pull
+          # much newer apache-airflow-providers-google (12.0.0 and 20.0.0), which
+          # is the dependency that actually governs plugin compatibility.
+          - { airflow-version: '2.10.5', python-version: '3.12' }
+          - { airflow-version: '2.11.2', python-version: '3.12' }
 
     steps:
       - uses: actions/checkout@v7
@@ -51,7 +63,7 @@ jobs:
 
       - name: Install dependencies
         env:
-          AIRFLOW_VERSION: 2.9.1
+          AIRFLOW_VERSION: ${{ matrix.airflow-version }}
         run: |
           python -m pip install --upgrade pip
           PY_VERSION=$(python -c "import sys; print(f'{sys.version_info[0]}.{sys.version_info[1]}')")
@@ -61,6 +73,11 @@ jobs:
           pip install -r bq-job-optimizer-airflow-2/test_requirements.txt --constraint "${CONSTRAINT_URL}"
           pip install --constraint "${CONSTRAINT_URL}" google-auth-httplib2 google-api-python-client pandas-gbq gcloud-aio-bigquery gcloud-aio-storage google-cloud-secret-manager google-cloud-storage
           pip install --constraint "${CONSTRAINT_URL}" -e .
+
+      - name: Record resolved versions
+        run: |
+          python -c "import airflow; print('apache-airflow', airflow.__version__)"
+          python -c "from importlib.metadata import version; print('apache-airflow-providers-google', version('apache-airflow-providers-google'))"
 
       - name: Set up Airflow
         run: |
