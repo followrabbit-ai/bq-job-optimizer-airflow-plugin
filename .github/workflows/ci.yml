@@ -52,6 +52,8 @@ jobs:
           # is the dependency that actually governs plugin compatibility.
           - { airflow-version: '2.10.5', python-version: '3.12' }
           - { airflow-version: '2.11.2', python-version: '3.12' }
+          # Oldest supported Python against the newest providers.
+          - { airflow-version: '2.11.2', python-version: '3.9' }
 
     steps:
       - uses: actions/checkout@v7
@@ -116,5 +118,12 @@ jobs:
         run: |
           export AIRFLOW_HOME=$(pwd)/airflow_home
           python -m unittest bq-job-optimizer-airflow-2/test_plugin_optimization.py
+        env:
+          AIRFLOW_HOME: ${{ github.workspace }}/airflow_home
+
+      - name: Run dry-run guard tests
+        run: |
+          export AIRFLOW_HOME=$(pwd)/airflow_home
+          python -m unittest bq-job-optimizer-airflow-2/test_dry_run_guard.py
         env:
           AIRFLOW_HOME: ${{ github.workspace }}/airflow_home
