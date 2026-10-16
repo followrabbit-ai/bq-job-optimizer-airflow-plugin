@@ -19,17 +19,17 @@ Already running an older version? See [Updating](#updating).
 1. Add the plugin and client to your Airflow environment:
    - If using `requirements.txt`:
      ```txt
-     rabbit-bq-job-optimizer==0.1.18
-     rabbit-bq-optimizer-airflow-plugin==1.1.2
+     rabbit-bq-job-optimizer==0.1.19
+     rabbit-bq-optimizer-airflow-plugin==1.1.4
      ```
    - If using `constraints.txt`:
      ```txt
-     rabbit-bq-job-optimizer==0.1.18
-     rabbit-bq-optimizer-airflow-plugin==1.1.2
+     rabbit-bq-job-optimizer==0.1.19
+     rabbit-bq-optimizer-airflow-plugin==1.1.4
      ```
    - If using a custom Docker image, add to your Dockerfile:
      ```dockerfile
-     RUN pip install rabbit-bq-job-optimizer==0.1.18 rabbit-bq-optimizer-airflow-plugin==1.1.2
+     RUN pip install rabbit-bq-job-optimizer==0.1.19 rabbit-bq-optimizer-airflow-plugin==1.1.4
      ```
 
    The plugin registers via Airflow's plugin entry point — no file copy into `plugins/` is required.
@@ -41,7 +41,7 @@ Already running an older version? See [Updating](#updating).
 1. Add the Python client to your Airflow environment dependencies:
 
    ```txt
-   rabbit-bq-job-optimizer==0.1.18
+   rabbit-bq-job-optimizer==0.1.19
    ```
 
 2. Copy the plugin file into your Airflow plugins directory:
@@ -58,8 +58,8 @@ Already running an older version? See [Updating](#updating).
 Update to the new package versions in your environment dependencies:
 
 ```txt
-rabbit-bq-job-optimizer==0.1.18
-rabbit-bq-optimizer-airflow-plugin==1.1.2
+rabbit-bq-job-optimizer==0.1.19
+rabbit-bq-optimizer-airflow-plugin==1.1.4
 ```
 
 Apply the update using your platform's usual process, then restart Airflow components (including the triggerer if you use deferrable `BigQueryInsertJobOperator`). Your `rabbit_api` connection, `rabbit_bq_optimizer_config` variable, and DAGs are unchanged. If optimization fails, the plugin still submits the original job (fail-open).
@@ -121,7 +121,8 @@ The remaining optimizer configuration stays in an Airflow variable. Create a JSO
 - `default_pricing_mode` (required when `enabled` is `true`): The default pricing mode for jobs. Must be one of: `"on_demand"` or `"slot_based"`
 - `reservation_ids` (required when `default_pricing_mode` is `"on_demand"`): List of reservation IDs in the format "project:region.reservation-name". On-demand routing needs at least one reservation to compare against; missing or empty fails validation and the job submits unoptimized. When `default_pricing_mode` is `"slot_based"`, this field is optional (defaults to `[]`).
 - `dag_whitelist` (optional): List of DAG IDs to optimize. When omitted (or `null`), all DAGs are optimized. When set to a list, only BigQuery jobs from matching DAGs are optimized; all others pass through unmodified — and an **empty list (`[]`) means nothing is whitelisted, so no DAG is optimized**. Must be a JSON list; any other type is ignored and optimization is skipped as a safe fallback.
-- `debug` (optional): Turns on detailed error logs for troubleshooting. When the optimizer cannot change a job and falls back to the original BigQuery submit, Airflow normally shows only a short warning. Set this to `true` to also include the full Python error traceback in the task log — helpful when working with Rabbit support. Leave it unset or `false` in normal use. Default: off.
+- `statement_level` (optional): When `true`, opts multi-statement SCRIPT jobs into **per-statement reservation routing** — each statement of the script is routed to whichever is cheaper (a reservation or pay-as-you-go) instead of a single setting for the whole script. Also requires the tenant's `bq_dynamic_pricing_statement_level` feature flag, which is enabled by Rabbit; until it is on, setting this is a safe no-op. Before submitting a rewritten script, the plugin dry-runs it with your own BigQuery credentials and, on any error, submits the original job unchanged — worst case is a missed optimization, never a broken job. Default: off.
+- `debug` (optional): When `true`, fail-open paths include a full traceback, and successful optimizer calls log the API response JSON at INFO (`Rabbit BQ Optimizer: optimization result=...`). Default: off.
 
 ### Setting the Configuration
 
@@ -139,7 +140,8 @@ airflow variables set rabbit_bq_optimizer_config '{
     "dag_whitelist": [
         "my_etl_dag",
         "my_analytics_dag"
-    ]
+    ],
+    "statement_level": true
 }'
 ```
 
@@ -191,7 +193,7 @@ A setup script `setup_local_test.sh` is provided in the root directory to help y
    Check the logs for the following:
    - `Rabbit BQ Optimizer: patching BigQueryHook.insert_job` (scheduler logs at startup)
    - `Rabbit BQ Optimizer: patching BigQueryInsertJobOperator._submit_job` (scheduler logs at startup)
-   - `Rabbit BQ Optimizer: optimization result=...` at DEBUG on job submit (or failure if using dummy key/URL)
+   - `Rabbit BQ Optimizer: optimization result=...` on job submit when `debug` is true (INFO), or at DEBUG when `debug` is off (or failure if using dummy key/URL)
 
 4. **Run automated tests:**
    After setup, you can run automated tests to validate the plugin:
@@ -263,7 +265,7 @@ A setup script `setup_local_test.sh` is provided in the root directory to help y
 
 4. **Positive path (connection + variable present)**
    - Confirm in the scheduler logs at startup that the plugin logs `patching BigQueryHook.insert_job` and `patching BigQueryInsertJobOperator._submit_job`.
-   - Validate that the BigQuery job request reaches Rabbit (check Rabbit logs or enable DEBUG for `Rabbit BQ Optimizer: optimization result=...`).
+   - Validate that the BigQuery job request reaches Rabbit (check Rabbit logs, or set `"debug": true` in `rabbit_bq_optimizer_config` to see `Rabbit BQ Optimizer: optimization result=...` in the task log).
    - For a query with historical data/reservations, verify the resulting BigQuery job uses the optimized configuration.
 
 5. **Missing connection safety net**

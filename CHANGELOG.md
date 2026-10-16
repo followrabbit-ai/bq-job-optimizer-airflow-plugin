@@ -13,6 +13,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `UnicodeEncodeError: 'latin-1' codec can't encode characters` from deep inside the HTTP stack
   when the key was sent as a request header.
 
+### Documentation
+- Document the `statement_level` config field in the package README (config-field list and CLI example). The feature shipped in 1.1.3 (dry-run–guarded per-statement routing) but was only mentioned in the repo-root README, not the PyPI/package README.
+
+## [1.1.4] - 2026-08-12
+
+### Changed
+- When `debug` is `true`, successful optimizer calls also log the full job-optimizer API response as JSON at INFO (in addition to fail-open traceback logging).
+
 ## [1.1.3] - 2026-08-04
 
 ### Added
