@@ -52,8 +52,8 @@ jobs:
           # is the dependency that actually governs plugin compatibility.
           - { airflow-version: '2.10.5', python-version: '3.12' }
           - { airflow-version: '2.11.2', python-version: '3.12' }
-          # Oldest supported Python against the newest providers.
-          - { airflow-version: '2.11.2', python-version: '3.9' }
+          # Oldest Python Airflow 2.11 supports, against the newest providers.
+          - { airflow-version: '2.11.2', python-version: '3.10' }
 
     steps:
       - uses: actions/checkout@v7

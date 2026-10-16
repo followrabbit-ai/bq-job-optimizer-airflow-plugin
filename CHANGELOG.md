@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- Verified compatibility with Airflow 2.10 and 2.11, including `apache-airflow-providers-google` up to 20.x. Airflow 2.9 remains supported.
+
 ### Documentation
 - Document the `statement_level` config field in the package README (config-field list and CLI example). The feature shipped in 1.1.3 (dry-run–guarded per-statement routing) but was only mentioned in the repo-root README, not the PyPI/package README.
 
