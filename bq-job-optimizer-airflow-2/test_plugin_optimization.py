@@ -34,6 +34,16 @@ class TestPluginOptimization(unittest.TestCase):
             if hasattr(cls, marker):
                 delattr(cls, marker)
 
+    @staticmethod
+    def _execute_context(op):
+        return {
+            "logical_date": datetime(2026, 1, 1),
+            # providers>=20 read context["task"] in BigQueryJobDetailLink.persist
+            "task": op,
+            # try_number must be a real int; submit_job compares it (> 2)
+            "ti": MagicMock(try_number=1),
+        }
+
     def _mock_optimizer_response(self, *, pool_project: str | None):
         from rabbit_bq_job_optimizer.models import OptimizationResponse
 
@@ -160,7 +170,7 @@ class TestPluginOptimization(unittest.TestCase):
         with self._patch_plugin(plugin_module, mock_client=mock_client):
             plugin_module.patch_bigquery_hook()
             plugin_module.patch_bigquery_insert_job_operator()
-            op.execute(context={"logical_date": datetime(2026, 1, 1), "ti": MagicMock()})
+            op.execute(context=self._execute_context(op))
 
         self.assertTrue(submitted.get("bridge_active"))
         self.assertEqual(op.project_id, POOL_BILLING_PROJECT)
@@ -228,7 +238,7 @@ class TestPluginOptimization(unittest.TestCase):
         with self._patch_plugin(plugin_module, mock_client=mock_client):
             plugin_module.patch_bigquery_hook()
             plugin_module.patch_bigquery_insert_job_operator()
-            op.execute(context={"logical_date": datetime(2026, 1, 1), "ti": MagicMock()})
+            op.execute(context=self._execute_context(op))
 
         # Job actually landed on the source project; operator must agree so poll/defer match.
         self.assertEqual(submitted["kwargs"]["project_id"], SOURCE_PROJECT)
@@ -283,7 +293,7 @@ class TestPluginOptimization(unittest.TestCase):
         with self._patch_plugin(plugin_module, mock_client=mock_client):
             plugin_module.patch_bigquery_hook()
             plugin_module.patch_bigquery_insert_job_operator()
-            op.execute(context={"logical_date": datetime(2026, 1, 1), "ti": MagicMock()})
+            op.execute(context=self._execute_context(op))
 
         self.assertEqual(op.project_id, SOURCE_PROJECT)
         self.assertEqual(submitted["kwargs"]["project_id"], SOURCE_PROJECT)

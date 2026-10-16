@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- Verified compatibility with Airflow 2.10 and 2.11, including `apache-airflow-providers-google` up to 20.x. Airflow 2.9 remains supported.
+
 ### Fixed
 - Fail fast with a clear error when the `rabbit_api` connection password contains non-ASCII
   characters (e.g. a garbled copy-paste). Previously this surfaced as an opaque
