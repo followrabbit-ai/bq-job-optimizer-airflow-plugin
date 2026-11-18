@@ -8,6 +8,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Airflow 3 support.** The same package now supports Airflow 3.1 – 3.4 next to Airflow 2.9 – 2.11,
+  with the same behaviour and configuration. The plugin imports from the Airflow Task SDK
+  (`airflow.sdk`) on Airflow 3, so its own imports no longer log deprecation warnings there.
+- **End-to-end test.** CI now runs a real Airflow (scheduler, triggerer, and on Airflow 3 the API
+  server and DAG processor) on every supported Airflow version, executing a DAG against a fake
+  BigQuery and a fake Rabbit API and checking each task's state and submitted jobs. Run it locally
+  with `bq-job-optimizer-airflow/run_tests.sh` or, for any Airflow version, `./test_in_docker.sh`.
 - **Routing retry.** When a job that Rabbit moved to on-demand (reservation `none`, a pool billing
   project, or a statement-level rewrite) is accepted by BigQuery and then fails on an
   on-demand-only limit, `BigQueryInsertJobOperator` now runs it once more with the original
@@ -18,6 +25,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   retry. The retried job is labelled `rabbit-routing-retry: applied`. A script that failed midway
   is re-run from the start, as with an Airflow task retry. Previously the plugin only fell back
   when the optimized *submit* raised, so these failures repeated on every Airflow retry.
+
+### Fixed
+- On Airflow 3, a missing `rabbit_bq_optimizer_config` variable raised an error the plugin did not
+  catch, so the BigQuery task failed instead of running unoptimized. Any error while loading the
+  configuration now falls back to the original job.
+
+### Changed
+- The source folder is renamed from `bq-job-optimizer-airflow-2` to `bq-job-optimizer-airflow`. The
+  PyPI package name and the module name are unchanged; only "copy into `plugins/`" installs that
+  reference the folder path need the new path.
 
 ## [1.1.5] - 2026-10-16
 

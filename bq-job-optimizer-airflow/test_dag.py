@@ -15,7 +15,7 @@ with DAG(
     "rabbit_optimizer_test",
     default_args=default_args,
     description="Test DAG for Rabbit BQ Optimizer Plugin",
-    schedule_interval=None,
+    schedule=None,
     start_date=datetime(2024, 1, 1),
     catchup=False,
 ) as dag:

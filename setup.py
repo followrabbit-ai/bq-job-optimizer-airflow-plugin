@@ -4,14 +4,14 @@ setup(
     name="rabbit-bq-optimizer-airflow-plugin",
     version="1.1.5",
     py_modules=["rabbit_bq_optimizer_plugin"],
-    package_dir={"": "bq-job-optimizer-airflow-2"},
+    package_dir={"": "bq-job-optimizer-airflow"},
     install_requires=[
         "rabbit-bq-job-optimizer>=0.1.19",
     ],
     author="Rabbit Team",
     author_email="success@followrabbit.ai",
-    description="Airflow 2 plugin for Rabbit BigQuery Job Optimizer",
-    long_description=open("bq-job-optimizer-airflow-2/README.md").read(),
+    description="Airflow plugin (Airflow 2 and 3) for Rabbit BigQuery Job Optimizer",
+    long_description=open("bq-job-optimizer-airflow/README.md").read(),
     long_description_content_type="text/markdown",
     url="https://github.com/followrabbit-ai/bq-job-optimizer-airflow-plugin",
     classifiers=[
