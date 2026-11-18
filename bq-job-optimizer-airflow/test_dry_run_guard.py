@@ -58,6 +58,21 @@ class TestDryRunGuard(unittest.TestCase):
             )
         )
 
+    def test_plugin_imports_raise_no_deprecation_warning(self):
+        # On Airflow 3 the old import paths still work but warn; the plugin must not use them.
+        import importlib
+        import warnings
+
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always")
+            importlib.reload(plugin)
+        own = [
+            str(w.message)
+            for w in caught
+            if issubclass(w.category, DeprecationWarning) and w.filename == plugin.__file__
+        ]
+        self.assertEqual(own, [])
+
     def test_client_identity_header_value(self):
         self.assertTrue(plugin.RABBIT_CLIENT_INFO.startswith("rabbit-bq-optimizer-airflow-plugin/"))
 

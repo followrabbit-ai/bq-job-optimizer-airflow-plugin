@@ -16,8 +16,7 @@ repo_root = os.path.dirname(script_dir)
 os.environ["AIRFLOW_HOME"] = os.path.join(repo_root, "airflow_home")
 
 # Import Airflow components
-from airflow.hooks.base import BaseHook  # noqa: E402
-from airflow.models import Variable  # noqa: E402
+from rabbit_bq_optimizer_plugin import BaseHook, Variable  # noqa: E402
 
 
 def test_dag_execution_with_optimizer():
@@ -124,7 +123,7 @@ def test_dag_execution_with_optimizer():
         # Patch RabbitBQJobOptimizer to use our mock
         with (
             patch(
-                "airflow.hooks.base.BaseHook.get_connection",
+                "rabbit_bq_optimizer_plugin.BaseHook.get_connection",
                 return_value=MagicMock(extra_dejson={"project": "test-source-project"}),
             ),
             patch("rabbit_bq_optimizer_plugin.RabbitBQJobOptimizer", return_value=mock_client),
@@ -153,8 +152,7 @@ def test_dag_execution_with_optimizer():
                 else:
                     print("⚠ Original insert_job called, but optimize_job not called")
                     print("  This may indicate the optimization was skipped")
-                    # Still pass if original was called - means plugin is intercepting
-                    return True
+                    return False
             else:
                 print("✗ Original insert_job was not called")
                 print("  This suggests the plugin patch may not be working correctly")

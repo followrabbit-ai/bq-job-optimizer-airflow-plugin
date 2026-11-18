@@ -57,7 +57,7 @@ def _run_insert_job(config):
     Apply a fresh patch and call insert_job once.
 
     Returns optimize_job_called: bool. Tests that need a specific Airflow
-    context patch ``airflow.operators.python.get_current_context`` themselves
+    context patch ``rabbit_bq_optimizer_plugin.get_current_context`` themselves
     before calling this helper, since the plugin imports it locally inside
     ``insert_job``.
     """
@@ -128,7 +128,7 @@ def test_dag_in_whitelist_optimized():
 
     mock_context = {"dag": MagicMock(dag_id="my_dag")}
 
-    with patch("airflow.operators.python.get_current_context", return_value=mock_context):
+    with patch("rabbit_bq_optimizer_plugin.get_current_context", return_value=mock_context):
         optimized = _run_insert_job(config)
 
     if optimized:
@@ -145,7 +145,7 @@ def test_dag_not_in_whitelist_skipped():
 
     mock_context = {"dag": MagicMock(dag_id="other_dag")}
 
-    with patch("airflow.operators.python.get_current_context", return_value=mock_context):
+    with patch("rabbit_bq_optimizer_plugin.get_current_context", return_value=mock_context):
         optimized = _run_insert_job(config)
 
     if not optimized:
@@ -161,7 +161,7 @@ def test_context_unavailable_skips_when_whitelist_set():
     config = {**VALID_CONFIG_BASE, "dag_whitelist": ["some_dag"]}
 
     with patch(
-        "airflow.operators.python.get_current_context",
+        "rabbit_bq_optimizer_plugin.get_current_context",
         side_effect=RuntimeError("No context"),
     ):
         optimized = _run_insert_job(config)

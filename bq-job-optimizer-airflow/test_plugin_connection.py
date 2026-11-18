@@ -16,11 +16,11 @@ os.environ["AIRFLOW_HOME"] = os.path.join(repo_root, "airflow_home")
 
 # Import Airflow components
 from airflow.exceptions import AirflowException  # noqa: E402
-from airflow.hooks.base import BaseHook  # noqa: E402
 
 # Import the plugin's connection loading function
 from rabbit_bq_optimizer_plugin import (  # noqa: E402
     RABBIT_API_CONN_ID,
+    BaseHook,
     _load_rabbit_credentials,
 )
 

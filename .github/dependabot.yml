@@ -19,7 +19,7 @@ updates:
     target-branch: "master"
 
   - package-ecosystem: "pip"
-    directory: "/bq-job-optimizer-airflow-2"
+    directory: "/bq-job-optimizer-airflow"
     labels:
       - "dependencies"
     schedule:

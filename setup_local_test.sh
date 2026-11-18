@@ -93,7 +93,7 @@ CONSTRAINT_URL="https://raw.githubusercontent.com/apache/airflow/constraints-${A
 
 echo "Using constraint file: $CONSTRAINT_URL"
 pip install "apache-airflow==${AIRFLOW_VERSION}" --constraint "${CONSTRAINT_URL}"
-pip install -r bq-job-optimizer-airflow-2/test_requirements.txt --constraint "${CONSTRAINT_URL}"
+pip install -r bq-job-optimizer-airflow/test_requirements.txt --constraint "${CONSTRAINT_URL}"
 pip install --constraint "${CONSTRAINT_URL}" \
     google-auth-httplib2 \
     google-api-python-client \
@@ -121,9 +121,9 @@ fi
 
 # Deploy test DAG (plugin loads via pip install -e . entry point)
 # For copy-paste testing instead, comment out `pip install -e .` above and run:
-#   cp bq-job-optimizer-airflow-2/rabbit_bq_optimizer_plugin.py "$PLUGIN_DIR/"
+#   cp bq-job-optimizer-airflow/rabbit_bq_optimizer_plugin.py "$PLUGIN_DIR/"
 echo "Deploying test DAG..."
-cp bq-job-optimizer-airflow-2/test_dag.py "$DAGS_DIR/"
+cp bq-job-optimizer-airflow/test_dag.py "$DAGS_DIR/"
 
 # Setup configuration
 echo "Configuring Airflow..."
