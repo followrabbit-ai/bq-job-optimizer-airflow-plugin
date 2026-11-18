@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.2.0] - 2026-11-18
+
 ### Added
 - **Airflow 3 support.** The same package now supports Airflow 3.1 – 3.4 next to Airflow 2.9 – 2.11,
   with the same behaviour and configuration. The plugin imports from the Airflow Task SDK
