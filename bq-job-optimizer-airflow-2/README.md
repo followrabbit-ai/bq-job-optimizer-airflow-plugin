@@ -326,6 +326,7 @@ Optimized jobs include labels you can query in BigQuery
 | `rabbit-source-project` | GCP project id | Project the job was submitted from (your DAG / operator `project_id`) |
 | `rabbit-pool-project` | GCP project id | Pool billing project recommended by the optimizer (present only when a pool was assigned) |
 | `rabbit-pool-routing` | `applied` \| `skipped` \| `none` | `applied`: `BigQueryInsertJobOperator` submitted on `rabbit-pool-project`; `skipped`: pool recommended but submit stayed on the source project (typically a direct hook call); `none`: no pool billing project in the optimizer response |
+| `rabbit-routing-retry` | `applied` | The job is the routing retry: the first, Rabbit-routed job failed on an on-demand-only limit and this one runs on the original configuration (see [Routing retry](#routing-retry)) |
 
 ## Error Handling
 
@@ -336,6 +337,41 @@ The plugin includes comprehensive error handling for:
 - API errors
 
 In all error cases, the plugin will log a warning and proceed with the original job configuration.
+
+### Routing retry
+
+Some BigQuery limits apply only to on-demand jobs, so a job that Rabbit moved from a
+reservation to on-demand can be accepted and then fail, although it would have succeeded
+where it was. When that happens in a `BigQueryInsertJobOperator` task, the plugin runs the
+job **once more with the original configuration** (original project, original reservation,
+no optimizer call) and the task continues with that job. This works for both deferrable and
+non-deferrable operators.
+
+The retry happens only when both conditions hold:
+
+- **Rabbit moved the job**: the optimized job has `reservation: none`, runs on a pool billing
+  project, or was rewritten for statement-level routing.
+- **The job failed on an on-demand-only limit**:
+  - a custom query-usage quota (`QueryUsagePerDay`, `QueryUsagePerUserPerDay`), reported as
+    `Custom quota exceeded`. BigQuery checks this quota against the up-front estimate, which
+    can be far above what the job actually reads.
+  - `billingTierLimitExceeded`, the on-demand CPU-per-byte limit.
+
+Every other failure (SQL errors, permission errors, `backendError`, ...) surfaces as before,
+and so does a failure of the retry itself: there is no second retry. Airflow task retries
+are unaffected and go through the optimizer again.
+
+The retry is logged as a warning (`Rabbit BQ Optimizer: re-routed job failed on an on-demand
+limit ... Retrying once with the original configuration.`) and the retried job carries the
+label `rabbit-routing-retry: applied`.
+
+**Partial execution.** A multi-statement script can fail on statement N after statements 1
+to N-1 already ran. The retry runs the whole script again from the start, exactly as an
+Airflow task retry would, so scripts should be safe to re-run (idempotent).
+
+Jobs submitted by calling `BigQueryHook.insert_job` directly, or by other operators, are not
+covered: the plugin does not see their result. A direct call with `nowait=False` falls back
+to the original configuration on any failure, as before.
 
 ## Troubleshooting
 

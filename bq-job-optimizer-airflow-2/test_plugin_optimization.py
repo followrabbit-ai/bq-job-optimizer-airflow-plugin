@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Unit tests for plugin optimization: pool routing, fail-open, and hook bridge."""
+"""Unit tests for plugin optimization: pool routing, fail-open, hook bridge, routing retry."""
 
 from __future__ import annotations
 
@@ -12,6 +12,21 @@ from unittest.mock import MagicMock, patch
 script_dir = os.path.dirname(os.path.abspath(__file__))
 repo_root = os.path.dirname(script_dir)
 os.environ.setdefault("AIRFLOW_HOME", os.path.join(repo_root, "airflow_home"))
+
+from airflow.providers.google.cloud.hooks.bigquery import BigQueryHook  # noqa: E402
+from airflow.providers.google.cloud.operators.bigquery import (  # noqa: E402
+    BigQueryInsertJobOperator,
+)
+
+# The provider's own methods, captured before any test patches them.
+_PROVIDER_ORIGINALS = {
+    (cls.__name__, name): getattr(cls, name)
+    for cls, names in (
+        (BigQueryInsertJobOperator, ("execute", "execute_complete", "_submit_job")),
+        (BigQueryHook, ("insert_job", "get_job")),
+    )
+    for name in names
+}
 
 # Generic example GCP project IDs — no customer-specific names in public tests.
 SOURCE_PROJECT = "example-analytics-prod"
@@ -625,6 +640,290 @@ class TestPluginOptimization(unittest.TestCase):
 
         self.assertEqual(submitted["configuration"], original_config)
         mock_client.optimize_job.assert_called_once()
+
+
+QUOTA_MESSAGE = (
+    "Custom quota exceeded: Your usage exceeded the custom quota for QueryUsagePerDay, "
+    "which is set by your administrator. at [40:1]"
+)
+QUOTA_ERROR = {"reason": "invalidQuery", "message": QUOTA_MESSAGE}  # as a script parent reports it
+BILLING_TIER_ERROR = {
+    "reason": "billingTierLimitExceeded",
+    "message": "Query exceeded resource limits. 2147.3 CPU seconds were used.",
+}
+SYNTAX_ERROR = {"reason": "invalidQuery", "message": "Syntax error: Unexpected identifier"}
+ORIGINAL_CONFIG = {"query": {"query": "SELECT 1", "useLegacySql": False}}
+
+
+class TestRoutingRetry(unittest.TestCase):
+    """A job Rabbit moved that fails on an on-demand-only limit is retried once, unoptimized."""
+
+    def setUp(self):
+        import importlib
+
+        import rabbit_bq_optimizer_plugin as plugin_module
+        from airflow.providers.google.cloud.hooks.bigquery import BigQueryHook
+        from airflow.providers.google.cloud.operators.bigquery import BigQueryInsertJobOperator
+
+        self.plugin = importlib.reload(plugin_module)
+        self.hook_cls, self.op_cls = BigQueryHook, BigQueryInsertJobOperator
+        # Start every test from the provider's own methods so the patches never stack.
+        for cls, names in (
+            (BigQueryInsertJobOperator, ("execute", "execute_complete", "_submit_job")),
+            (BigQueryHook, ("insert_job", "get_job")),
+        ):
+            for name in names:
+                setattr(cls, name, _PROVIDER_ORIGINALS[cls.__name__, name])
+        for cls, marker in (
+            (BigQueryHook, self.plugin.RABBIT_HOOK_PATCHED_MARKER),
+            (BigQueryInsertJobOperator, self.plugin.RABBIT_OPERATOR_PATCHED_MARKER),
+        ):
+            if hasattr(cls, marker):
+                delattr(cls, marker)
+        self.addCleanup(self._restore)
+        self.submits: list[dict] = []
+
+    def _restore(self):
+        for cls in (self.hook_cls, self.op_cls):
+            for (cls_name, name), original in _PROVIDER_ORIGINALS.items():
+                if cls_name == cls.__name__:
+                    setattr(cls, name, original)
+
+    def _run(self, fn, *, errors, pool_project=None, reservation="none", running=False):
+        """Run ``fn`` with the plugin patched in. ``errors[i]`` is the error_result of the i-th
+        submitted job (None = success). Jobs fail the way BigQuery does: ``result()`` raises and
+        ``error_result`` is set."""
+        from google.api_core.exceptions import BadRequest
+        from rabbit_bq_job_optimizer.models import OptimizationResponse
+
+        def fake_bq_submit(hook, *, configuration, **kwargs):
+            error = errors[len(self.submits)]
+            self.submits.append({"configuration": configuration, "kwargs": dict(kwargs)})
+            job = MagicMock()
+            job.job_id = kwargs.get("job_id") or "mock-job"
+            job.running.return_value = running
+            job.state = "DONE"
+            job.error_result = error
+            job.errors = [error] if error else []
+            if error:
+                job.result.side_effect = BadRequest(error["message"], errors=[error])
+            job.to_api_repr.return_value = {"configuration": {}}
+            return job
+
+        self.hook_cls.insert_job = fake_bq_submit
+
+        optimized_job: dict = {"configuration": {**ORIGINAL_CONFIG}}
+        if reservation:
+            optimized_job["configuration"]["reservation"] = reservation
+        if pool_project:
+            optimized_job["jobReference"] = {"projectId": pool_project}
+        self.optimizer = MagicMock()
+        self.optimizer.optimize_job.return_value = OptimizationResponse(
+            optimizedJob=optimized_job,
+            optimizationResults=[],
+            estimatedSavings=0.0,
+            optimizationPerformed=True,
+        )
+
+        from airflow.models import Variable
+
+        with (
+            patch.object(
+                Variable,
+                "get",
+                return_value={"enabled": True, "default_pricing_mode": "slot_based"},
+            ),
+            patch.object(
+                self.plugin,
+                "_load_rabbit_credentials",
+                return_value={"api_key": "k", "base_url": None},
+            ),
+            patch.object(self.plugin, "RabbitBQJobOptimizer", return_value=self.optimizer),
+        ):
+            self.plugin.patch_bigquery_hook()
+            self.plugin.patch_bigquery_insert_job_operator()
+            return fn()
+
+    def _operator(self, *, deferrable=False, cls=None, **kwargs):
+        from airflow import DAG
+
+        dag = DAG(f"routing_retry_{self.id().rsplit('.', 1)[-1]}", start_date=datetime(2026, 1, 1))
+        return (cls or self.op_cls)(
+            task_id="run_query",
+            configuration={"query": dict(ORIGINAL_CONFIG["query"])},
+            project_id=SOURCE_PROJECT,
+            location="US",
+            deferrable=deferrable,
+            dag=dag,
+            **kwargs,
+        )
+
+    def _execute(self, op):
+        return op.execute(context=TestPluginOptimization._execute_context(op))
+
+    def _assert_retried_on_original(self, op):
+        self.assertEqual(len(self.submits), 2)
+        first, retry = self.submits
+        self.assertEqual(first["configuration"].get("reservation"), "none")
+        self.assertNotIn("reservation", retry["configuration"])
+        self.assertEqual(retry["configuration"]["query"], ORIGINAL_CONFIG["query"])
+        self.assertEqual(retry["configuration"]["labels"].get("rabbit-routing-retry"), "applied")
+        self.assertNotIn("rabbit-pool-routing", retry["configuration"]["labels"])
+        self.assertEqual(retry["kwargs"]["project_id"], SOURCE_PROJECT)
+        self.assertNotEqual(first["kwargs"]["job_id"], retry["kwargs"]["job_id"])
+        # Operator state points at the retried job, on the source project.
+        self.assertEqual(op.project_id, SOURCE_PROJECT)
+        self.assertEqual(op.job_id, retry["kwargs"]["job_id"])
+        self.assertIs(op.configuration, retry["configuration"])
+        self.optimizer.optimize_job.assert_called_once()
+
+    def test_quota_error_on_script_parent_is_retried_on_original_config(self):
+        op = self._operator()
+        self._run(lambda: self._execute(op), errors=[QUOTA_ERROR, None])
+        self._assert_retried_on_original(op)
+
+    def test_billing_tier_error_on_pool_job_is_retried_on_source_project(self):
+        op = self._operator()
+        self._run(
+            lambda: self._execute(op),
+            errors=[BILLING_TIER_ERROR, None],
+            pool_project=POOL_BILLING_PROJECT,
+        )
+        self.assertEqual(self.submits[0]["kwargs"]["project_id"], POOL_BILLING_PROJECT)
+        self._assert_retried_on_original(op)
+
+    def test_non_routing_error_is_not_retried(self):
+        from google.api_core.exceptions import BadRequest
+
+        op = self._operator()
+        with self.assertRaises(BadRequest):
+            self._run(lambda: self._execute(op), errors=[SYNTAX_ERROR])
+        self.assertEqual(len(self.submits), 1)
+
+    def test_failed_retry_surfaces_without_second_retry(self):
+        from google.api_core.exceptions import BadRequest
+
+        op = self._operator()
+        with self.assertRaises(BadRequest):
+            self._run(lambda: self._execute(op), errors=[QUOTA_ERROR, QUOTA_ERROR])
+        self.assertEqual(len(self.submits), 2)
+
+    def test_job_rabbit_did_not_move_is_not_retried(self):
+        from google.api_core.exceptions import BadRequest
+
+        op = self._operator()
+        with self.assertRaises(BadRequest):
+            self._run(
+                lambda: self._execute(op),
+                errors=[QUOTA_ERROR],
+                reservation="projects/p/locations/US/reservations/r",
+            )
+        self.assertEqual(len(self.submits), 1)
+
+    def _defer(self, op, **run_kwargs):
+        from airflow.exceptions import TaskDeferred
+
+        with self.assertRaises(TaskDeferred) as ctx:
+            self._run(lambda: self._execute(op), running=True, **run_kwargs)
+        return ctx.exception
+
+    def test_deferrable_quota_error_is_retried_and_redeferred(self):
+        from airflow.exceptions import AirflowException, TaskDeferred
+
+        deferred = self._defer(self._operator(deferrable=True), errors=[None, None])
+        moved_job = deferred.kwargs["rabbit_moved_job"]
+        self.assertEqual(moved_job["job_id"], self.submits[0]["kwargs"]["job_id"])
+        self.assertEqual(moved_job["project_id"], SOURCE_PROJECT)
+
+        # The task resumes on a fresh operator instance with the trigger's failure event.
+        resumed = self._operator(deferrable=True)
+        event = {"status": "error", "message": QUOTA_MESSAGE}
+        context = TestPluginOptimization._execute_context(resumed)
+        with self.assertRaises(TaskDeferred) as ctx:
+            resumed.execute_complete(context, event, **deferred.kwargs)
+        self._assert_retried_on_original(resumed)
+        # The retry carries no rabbit kwarg, so its failure surfaces instead of retrying again.
+        self.assertFalse(ctx.exception.kwargs)
+        with self.assertRaises(AirflowException):
+            self._operator(deferrable=True).execute_complete(context, event)
+        self.assertEqual(len(self.submits), 2)
+
+    def test_deferrable_billing_tier_error_is_identified_by_job_reason(self):
+        from airflow.exceptions import TaskDeferred
+
+        deferred = self._defer(
+            self._operator(deferrable=True), errors=[None, None], pool_project=POOL_BILLING_PROJECT
+        )
+        self.assertEqual(deferred.kwargs["rabbit_moved_job"]["project_id"], POOL_BILLING_PROJECT)
+
+        failed_job = MagicMock(error_result=BILLING_TIER_ERROR, errors=[BILLING_TIER_ERROR])
+        resumed = self._operator(deferrable=True)
+        with patch.object(self.hook_cls, "get_job", return_value=failed_job) as get_job:
+            with self.assertRaises(TaskDeferred):
+                resumed.execute_complete(
+                    TestPluginOptimization._execute_context(resumed),
+                    {"status": "error", "message": BILLING_TIER_ERROR["message"]},
+                    **deferred.kwargs,
+                )
+        self.assertEqual(get_job.call_args.kwargs["project_id"], POOL_BILLING_PROJECT)
+        self._assert_retried_on_original(resumed)
+
+    def test_executor_safeguard_token_is_forwarded(self):
+        """Airflow passes its ExecutorSafeguard token only to a callable named "execute"; without
+        it, operators with allow_nested_operators=False refuse to run."""
+        from airflow.exceptions import TaskDeferred
+        from airflow.models.base import _sentinel
+
+        token = {"BigQueryInsertJobOperator__sentinel": _sentinel}
+        strict = {"allow_nested_operators": False}
+        op = self._operator(**strict)
+        context = TestPluginOptimization._execute_context(op)
+
+        def scenario():
+            # As TaskInstance calls it: token passed, and the retry runs too.
+            op.execute(context, **token)
+            self.assertEqual(self.op_cls.execute.__name__, "execute")
+            self._assert_retried_on_original(op)
+
+            # The retry after a deferral runs from execute_complete, which gets no token.
+            with self.assertRaises(TaskDeferred) as first:
+                self._operator(deferrable=True, **strict).execute(context, **token)
+            with self.assertRaises(TaskDeferred):
+                self._operator(deferrable=True, **strict).execute_complete(
+                    context,
+                    {"status": "error", "message": QUOTA_MESSAGE},
+                    **first.exception.kwargs,
+                )
+            self.assertEqual(len(self.submits), 4)
+
+        self._run(scenario, errors=[QUOTA_ERROR, None, None, None], running=True)
+
+    def test_subclass_with_own_execute_complete_defers_without_rabbit_kwarg(self):
+        class CustomOperator(self.op_cls):
+            def execute_complete(self, context, event):
+                return super().execute_complete(context, event)
+
+        op = self._operator(deferrable=True, cls=CustomOperator)
+        deferred = self._defer(op, errors=[None])
+        self.assertFalse(deferred.kwargs)
+
+    def test_deferrable_non_routing_error_and_success_are_untouched(self):
+        from airflow.exceptions import AirflowException
+
+        deferred = self._defer(self._operator(deferrable=True), errors=[None])
+        resumed = self._operator(deferrable=True)
+        context = TestPluginOptimization._execute_context(resumed)
+        failed_job = MagicMock(error_result=SYNTAX_ERROR, errors=[SYNTAX_ERROR])
+        with patch.object(self.hook_cls, "get_job", return_value=failed_job):
+            with self.assertRaises(AirflowException):
+                resumed.execute_complete(
+                    context,
+                    {"status": "error", "message": SYNTAX_ERROR["message"]},
+                    **deferred.kwargs,
+                )
+        success = {"status": "success", "message": "Job completed", "job_id": "j1"}
+        resumed.execute_complete(context, success, **deferred.kwargs)
+        self.assertEqual(len(self.submits), 1)
 
 
 if __name__ == "__main__":

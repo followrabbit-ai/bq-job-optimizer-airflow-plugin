@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **Routing retry.** When a job that Rabbit moved to on-demand (reservation `none`, a pool billing
+  project, or a statement-level rewrite) is accepted by BigQuery and then fails on an
+  on-demand-only limit, `BigQueryInsertJobOperator` now runs it once more with the original
+  configuration, so the task succeeds where it would have without Rabbit. Covered errors: custom
+  query-usage quota (`Custom quota exceeded`, including the `invalidQuery` a script parent reports)
+  and `billingTierLimitExceeded`. Works for deferrable and non-deferrable operators. Other errors
+  and jobs Rabbit did not move are not retried, and a failed retry surfaces without a second
+  retry. The retried job is labelled `rabbit-routing-retry: applied`. A script that failed midway
+  is re-run from the start, as with an Airflow task retry. Previously the plugin only fell back
+  when the optimized *submit* raised, so these failures repeated on every Airflow retry.
+
 ## [1.1.5] - 2026-10-16
 
 ### Changed
