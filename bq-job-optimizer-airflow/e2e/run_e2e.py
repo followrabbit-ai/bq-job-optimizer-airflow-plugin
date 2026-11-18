@@ -10,6 +10,7 @@ to a Postgres database for parallel task execution; the default SQLite database 
 
 from __future__ import annotations
 
+import http.client
 import json
 import os
 import re
@@ -18,7 +19,6 @@ import subprocess
 import sys
 import tempfile
 import time
-import urllib.request
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -30,7 +30,7 @@ import fake_servers
 DAG_ID = "rabbit_e2e"
 SOURCE = "e2e-source-project"
 TIMEOUT_SECONDS = 600
-API_SERVER_HEALTH = "http://localhost:8080/api/v2/monitor/health"
+API_SERVER_PORT = 8080
 TERMINAL = {"success", "failed", "upstream_failed", "skipped", "removed"}
 
 # scenario -> (final task state, [(project, on_demand, retry_label, job fails)] in order)
@@ -87,7 +87,7 @@ def _airflow(*args: str, check: bool = True) -> str:
 
 
 def _task_states(run_id: str) -> dict[str, str]:
-    out = _airflow("tasks", "states-for-dag-run", DAG_ID, run_id, "-o", "json", check=False)
+    out = _airflow("tasks", "states-for-dag-run", DAG_ID, run_id, "-o", "json")
     match = re.search(r"\[\s*\{", out)  # Airflow 3 may print log lines before the JSON
     if not match:
         return {}
@@ -101,9 +101,10 @@ def _wait_for_api_server(standalone: subprocess.Popen) -> None:
         if standalone.poll() is not None:
             raise RuntimeError("airflow standalone exited early")
         try:
-            with urllib.request.urlopen(API_SERVER_HEALTH, timeout=5) as response:
-                if response.status == 200:
-                    return
+            connection = http.client.HTTPConnection("localhost", API_SERVER_PORT, timeout=5)
+            connection.request("GET", "/api/v2/monitor/health")
+            if connection.getresponse().status == 200:
+                return
         except OSError:
             pass
         time.sleep(2)
@@ -132,24 +133,37 @@ def main() -> int:
                     "extra": {"key_path": str(key_path), "project": SOURCE},
                 }
             ),
-            "AIRFLOW_CONN_RABBIT_API": json.dumps(
-                {
-                    "conn_type": "generic",
-                    "password": "e2e-key",
-                    "extra": {"api_base_url": f"http://127.0.0.1:{fake_servers.OPTIMIZER_PORT}"},
-                }
-            ),
-            "AIRFLOW_VAR_RABBIT_BQ_OPTIMIZER_CONFIG": json.dumps(
-                {
-                    "enabled": True,
-                    "default_pricing_mode": "slot_based",
-                    "reservation_ids": [f"{SOURCE}:US.prod"],
-                }
-            ),
         }
     )
     fake_servers.start()
     _airflow("db", "migrate")
+    # The plugin's connection and variable live in the metadata database, as in production,
+    # so tasks read them the way real deployments do (on Airflow 3: through the API server).
+    _airflow(
+        "connections",
+        "add",
+        "rabbit_api",
+        "--conn-json",
+        json.dumps(
+            {
+                "conn_type": "generic",
+                "password": "e2e-key",
+                "extra": {"api_base_url": f"http://127.0.0.1:{fake_servers.OPTIMIZER_PORT}"},
+            }
+        ),
+    )
+    _airflow(
+        "variables",
+        "set",
+        "rabbit_bq_optimizer_config",
+        json.dumps(
+            {
+                "enabled": True,
+                "default_pricing_mode": "slot_based",
+                "reservation_ids": [f"{SOURCE}:US.prod"],
+            }
+        ),
+    )
     _airflow("dags", "reserialize")
 
     log_path = home / "standalone.log"
@@ -197,14 +211,6 @@ def main() -> int:
             print(f"{'PASS' if ok else 'FAIL'} {task:22} state={got[0]} jobs={len(got[1])}")
             if not ok:
                 failures.append(f"{task}: expected {(want_state, want_jobs)}, got {got}")
-
-    safeguard = [
-        str(path)
-        for path in (home / "logs").rglob("*.log")
-        if "cannot be called outside" in path.read_text(errors="replace")
-    ]
-    if safeguard:
-        failures.append(f"executor safeguard tripped in: {safeguard}")
 
     print(f"airflow {airflow.__version__}: {'OK' if not failures else 'FAILED'}")
     if failures:

@@ -152,8 +152,7 @@ def test_dag_execution_with_optimizer():
                 else:
                     print("⚠ Original insert_job called, but optimize_job not called")
                     print("  This may indicate the optimization was skipped")
-                    # Still pass if original was called - means plugin is intercepting
-                    return True
+                    return False
             else:
                 print("✗ Original insert_job was not called")
                 print("  This suggests the plugin patch may not be working correctly")

@@ -12,6 +12,8 @@ trap cleanup EXIT; cleanup
 docker network create "$NET" >/dev/null
 docker run -d --name "$NAME-db" --network "$NET" -e POSTGRES_USER=airflow -e POSTGRES_PASSWORD=airflow \
   -e POSTGRES_DB=airflow postgres:16 >/dev/null
+# Postgres restarts once during first-start init; wait for the final server on TCP.
+until docker exec "$NAME-db" pg_isready -q -h 127.0.0.1 -U airflow; do sleep 1; done
 docker run --rm --name "$NAME" --network "$NET" -v "$(pwd)":/src:ro \
   -e AIRFLOW__DATABASE__SQL_ALCHEMY_CONN="postgresql+psycopg2://airflow:airflow@$NAME-db/airflow" \
   -e AIRFLOW__CORE__EXECUTOR=LocalExecutor \

@@ -15,6 +15,11 @@ on:
     - cron: '0 5 * * 1'
   workflow_dispatch:
 
+# A newer push to the same branch or PR cancels the run it supersedes.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   lint-and-format:
     name: Lint and Format Check
@@ -43,8 +48,10 @@ jobs:
     name: Airflow ${{ matrix.airflow-version }} / Python ${{ matrix.python-version }}
     # Pinned: setup-python has no Python 3.9 build for Ubuntu 26.04 (ubuntu-latest).
     runs-on: ubuntu-24.04
-    # The "latest" row tracks whatever Airflow released last. It reports, but does not block.
-    continue-on-error: ${{ matrix.airflow-version == 'latest' }}
+    # The "latest" row tracks whatever Airflow released last. On pushes and PRs it reports
+    # without blocking; on the weekly run it fails the workflow, so a breaking Airflow release
+    # sends a failure notification.
+    continue-on-error: ${{ matrix.airflow-version == 'latest' && github.event_name != 'schedule' }}
     strategy:
       # Report every combination rather than cancelling siblings on first failure.
       fail-fast: false
@@ -70,8 +77,10 @@ jobs:
           - { airflow-version: '3.2.2', python-version: '3.12' }
           - { airflow-version: '3.3.2', python-version: '3.12' }
           - { airflow-version: '3.4.0', python-version: '3.12' }
-          # Oldest and newest Python on the newest pinned Airflow 3.
-          - { airflow-version: '3.4.0', python-version: '3.10' }
+          # Oldest Python of the oldest supported Airflow 3 (3.4 needs Python 3.11+), and the
+          # oldest and newest Python of the newest pinned one.
+          - { airflow-version: '3.1.8', python-version: '3.10' }
+          - { airflow-version: '3.4.0', python-version: '3.11' }
           - { airflow-version: '3.4.0', python-version: '3.13' }
           # Newest Airflow on PyPI, unpinned (non-blocking).
           - { airflow-version: 'latest', python-version: '3.12' }
@@ -100,21 +109,33 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
 
+      # uv resolves and installs Airflow several times faster than pip.
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v10
+        with:
+          enable-cache: true
+          cache-dependency-glob: |
+            setup.py
+            bq-job-optimizer-airflow/test_requirements.txt
+            .github/workflows/ci.yml
+
       - name: Install dependencies
         env:
           AIRFLOW_VERSION: ${{ matrix.airflow-version }}
+          UV_SYSTEM_PYTHON: '1'
         run: |
-          python -m pip install --upgrade pip
           if [ "${AIRFLOW_VERSION}" = "latest" ]; then
-            AIRFLOW_VERSION=$(curl -fsSL https://pypi.org/pypi/apache-airflow/json | python -c "import sys, json; print(json.load(sys.stdin)['info']['version'])")
+            curl -fsSL -o "${RUNNER_TEMP}/airflow.json" https://pypi.org/pypi/apache-airflow/json
+            AIRFLOW_VERSION=$(python -c "import json, sys; print(json.load(open(sys.argv[1]))['info']['version'])" "${RUNNER_TEMP}/airflow.json")
           fi
           PY_VERSION=$(python -c "import sys; print(f'{sys.version_info[0]}.{sys.version_info[1]}')")
           CONSTRAINT_URL="https://raw.githubusercontent.com/apache/airflow/constraints-${AIRFLOW_VERSION}/constraints-${PY_VERSION}.txt"
           echo "Using constraint file: ${CONSTRAINT_URL}"
-          pip install "apache-airflow[postgres]==${AIRFLOW_VERSION}" --constraint "${CONSTRAINT_URL}"
-          pip install -r bq-job-optimizer-airflow/test_requirements.txt --constraint "${CONSTRAINT_URL}"
-          pip install --constraint "${CONSTRAINT_URL}" google-auth-httplib2 google-api-python-client pandas-gbq gcloud-aio-bigquery gcloud-aio-storage google-cloud-secret-manager google-cloud-storage
-          pip install --constraint "${CONSTRAINT_URL}" -e .
+          uv pip install --constraint "${CONSTRAINT_URL}" \
+            "apache-airflow[postgres]==${AIRFLOW_VERSION}" \
+            -r bq-job-optimizer-airflow/test_requirements.txt \
+            google-auth-httplib2 google-api-python-client pandas-gbq gcloud-aio-bigquery gcloud-aio-storage google-cloud-secret-manager google-cloud-storage \
+            -e .
 
       - name: Record resolved versions
         run: |

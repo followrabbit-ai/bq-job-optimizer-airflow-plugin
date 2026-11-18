@@ -19,7 +19,7 @@ One package supports Airflow 2 and Airflow 3. CI runs the unit tests and an end-
 | Airflow | Python | `apache-airflow-providers-google` tested |
 | --- | --- | --- |
 | 2.9, 2.10, 2.11 | 3.9 – 3.12 | 10.17, 12.0, 20.0 |
-| 3.1, 3.2, 3.3, 3.4 | 3.10 – 3.13 | 20.0 – 22.8 |
+| 3.1, 3.2, 3.3, 3.4 | 3.10 – 3.13 (Airflow 3.4 needs 3.11+) | 20.0 – 22.8 |
 
 The plugin behaves the same on both major versions; installation and configuration do not differ. Airflow 3.0 is not supported: see [Airflow 3 notes](#airflow-3-notes).
 
@@ -250,7 +250,7 @@ To test a specific Airflow version without installing it, run the suite in the o
 | Rabbit API returns an error | The original job is submitted, task succeeds |
 | Job routed to a pool project | One job, in the pool project, task succeeds |
 
-The DAG sets `allow_nested_operators=False`, so a task also fails if the plugin breaks Airflow's executor safeguard. Set `AIRFLOW__DATABASE__SQL_ALCHEMY_CONN` to a Postgres database to run the tasks in parallel, as CI and `test_in_docker.sh` do; the default SQLite database also works.
+The plugin's connection and variable are stored in the metadata database, as in production. The DAG sets `allow_nested_operators=False`, so a task also fails if the plugin breaks Airflow's executor safeguard. Set `AIRFLOW__DATABASE__SQL_ALCHEMY_CONN` to a Postgres database to run the tasks in parallel, as CI and `test_in_docker.sh` do; the default SQLite database also works.
 
 When you add behaviour, add a scenario: a marker in `e2e/fake_servers.py`, the marker in `SCENARIOS` in the DAG, and the expected result in `EXPECTED` in `e2e/run_e2e.py`.
 
