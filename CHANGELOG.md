@@ -11,6 +11,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Airflow 3 support.** The same package now supports Airflow 3.1 – 3.4 next to Airflow 2.9 – 2.11,
   with the same behaviour and configuration. The plugin imports from the Airflow Task SDK
   (`airflow.sdk`) on Airflow 3, so its own imports no longer log deprecation warnings there.
+  Airflow 3.0 is not supported: with the Google provider it pins, deferrable BigQuery tasks hang
+  even without the plugin. Airflow 3.4 needs Python 3.11 or newer.
 - **End-to-end test.** CI now runs a real Airflow (scheduler, triggerer, and on Airflow 3 the API
   server and DAG processor) on every supported Airflow version, executing a DAG against a fake
   BigQuery and a fake Rabbit API and checking each task's state and submitted jobs. Run it locally
