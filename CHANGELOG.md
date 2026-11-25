@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Documentation
+- Explain how to choose `default_pricing_mode` (it describes where jobs run today, not a goal),
+  lead the configuration examples with `slot_based`, and warn against setting `reservation_ids`
+  in `slot_based` mode.
+- Document the `reservation_override_mode = ALLOW_ANY_OVERRIDE` prerequisite for routing jobs to
+  on-demand in `slot_based` mode, with troubleshooting entries for both misconfigurations.
+
 ## [1.1.5] - 2026-10-16
 
 ### Changed

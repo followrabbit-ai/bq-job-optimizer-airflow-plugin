@@ -102,7 +102,18 @@ airflow connections add rabbit_api \
 
 ### 2. Set the optimization parameters
 
-The remaining optimizer configuration stays in an Airflow variable. Create a JSON configuration with the following structure:
+The remaining optimizer configuration stays in an Airflow variable. First [choose your pricing mode](#choosing-default_pricing_mode). It depends on where your jobs run **today**, and getting it wrong makes the optimizer move jobs in the wrong direction.
+
+If your projects are assigned to BigQuery reservations (slot-based / capacity pricing), use:
+
+```json
+{
+    "enabled": true,
+    "default_pricing_mode": "slot_based"
+}
+```
+
+If your projects run on-demand (billed per TiB scanned, no reservation assignment), use:
 
 ```json
 {
@@ -115,11 +126,55 @@ The remaining optimizer configuration stays in an Airflow variable. Create a JSO
 }
 ```
 
+### Choosing `default_pricing_mode`
+
+`default_pricing_mode` tells the optimizer how your jobs are billed **when the plugin does nothing**. It is a statement about your current setup, not a preference or a goal. The optimizer compares the cost of each job under both pricing models and, when the other one is cheaper, moves the job away from that default:
+
+| Your jobs run today on... | Set | What the optimizer does | `reservation_ids` |
+| --- | --- | --- | --- |
+| A reservation (the job's project has a reservation assignment) | `"slot_based"` | Keeps each job on the reservation its project is assigned to, and moves it to on-demand (`reservation: none`) only when that is cheaper. | Leave it out. Each job's reservation is looked up from its project's assignment. |
+| On-demand (the job's project has no reservation assignment) | `"on_demand"` | Keeps each job on-demand, and assigns it to the reservation listed for its region only when that is cheaper. | Required: the reservation(s) jobs may be moved onto, at most one per region. |
+
+Common mistakes:
+
+- **Using `"on_demand"` because you want jobs moved to on-demand.** If your jobs already run on reservations, this is the wrong setting: the optimizer assumes they run on-demand and pins them onto the reservation in `reservation_ids`, including jobs from projects assigned to *other* reservations. No job is ever moved to on-demand. Use `"slot_based"`.
+- **Setting `reservation_ids` with `"slot_based"`.** When a reservation is listed for the job's region, it is used for pricing instead of the reservation the job's project is assigned to, so jobs on other reservations are priced at the wrong rate. Leave it out unless Rabbit asks you to set it.
+- **One setting for mixed environments.** The setting applies to every job the plugin sees in this Airflow environment. If some projects run on reservations and others on-demand, contact Rabbit before enabling the plugin.
+
+### Prerequisite for `"slot_based"`: allow on-demand overrides in BigQuery
+
+With `"slot_based"`, a job the optimizer moves to on-demand is submitted with `"reservation": "none"`, a per-job override of the project's reservation assignment. BigQuery only accepts it when the regional [`reservation_override_mode`](https://docs.cloud.google.com/bigquery/docs/default-configuration) setting is `ALLOW_ANY_OVERRIDE`. The default (`DENY_OVERRIDE_TO_NONE`) rejects the job with:
+
+```
+Override to 'none' is not enabled. The option 'reservation_override_mode' is set to 'RESERVATION_OVERRIDE_MODE_UNSPECIFIED'.
+```
+
+The plugin then resubmits the original job, so nothing breaks, but no job is ever moved to on-demand. Enable it on every project whose jobs go through the plugin (the project the query runs and is billed in), once per region:
+
+```sql
+-- Per project: repeat for each project and each region (region-us, region-eu, region-europe-west1, ...)
+ALTER PROJECT `YOUR_PROJECT`
+SET OPTIONS (`region-us.reservation_override_mode` = 'ALLOW_ANY_OVERRIDE');
+
+-- Or once for the whole organization (projects inherit it unless they set their own value)
+ALTER ORGANIZATION
+SET OPTIONS (`region-us.reservation_override_mode` = 'ALLOW_ANY_OVERRIDE');
+```
+
+Setting it requires `bigquery.config.update` (included in `roles/bigquery.admin`). A new value can take a few minutes to apply. To check the effective value:
+
+```sql
+SELECT * FROM `region-us`.INFORMATION_SCHEMA.EFFECTIVE_PROJECT_OPTIONS
+WHERE option_name = 'reservation_override_mode';
+```
+
+`"on_demand"` mode does not need this setting: it only overrides jobs onto a reservation, which the default allows.
+
 ### Configuration Fields
 
 - `enabled` (required): Must be `true` to run optimization. If omitted, `false`, or the variable is not set, each BigQuery submit bypasses optimization (no API call). Takes effect on the next job without restarting Airflow.
-- `default_pricing_mode` (required when `enabled` is `true`): The default pricing mode for jobs. Must be one of: `"on_demand"` or `"slot_based"`
-- `reservation_ids` (required when `default_pricing_mode` is `"on_demand"`): List of reservation IDs in the format "project:region.reservation-name". On-demand routing needs at least one reservation to compare against; missing or empty fails validation and the job submits unoptimized. When `default_pricing_mode` is `"slot_based"`, this field is optional (defaults to `[]`).
+- `default_pricing_mode` (required when `enabled` is `true`): How your jobs are billed today, when the plugin does nothing. Must be one of: `"slot_based"` (jobs run on a reservation) or `"on_demand"` (jobs run on-demand). See [Choosing `default_pricing_mode`](#choosing-default_pricing_mode).
+- `reservation_ids` (required when `default_pricing_mode` is `"on_demand"`): List of reservation IDs in the format "project:region.reservation-name". On-demand routing needs at least one reservation to compare against; missing or empty fails validation and the job submits unoptimized. When `default_pricing_mode` is `"slot_based"`, leave it out (defaults to `[]`): each job's reservation is then looked up from its project's assignment.
 - `dag_whitelist` (optional): List of DAG IDs to optimize. When omitted (or `null`), all DAGs are optimized. When set to a list, only BigQuery jobs from matching DAGs are optimized; all others pass through unmodified — and an **empty list (`[]`) means nothing is whitelisted, so no DAG is optimized**. Must be a JSON list; any other type is ignored and optimization is skipped as a safe fallback.
 - `statement_level` (optional): When `true`, opts multi-statement SCRIPT jobs into **per-statement reservation routing** — each statement of the script is routed to whichever is cheaper (a reservation or pay-as-you-go) instead of a single setting for the whole script. Also requires the tenant's `bq_dynamic_pricing_statement_level` feature flag, which is enabled by Rabbit; until it is on, setting this is a safe no-op. Before submitting a rewritten script, the plugin dry-runs it with your own BigQuery credentials and, on any error, submits the original job unchanged — worst case is a missed optimization, never a broken job. Default: off.
 - `debug` (optional): When `true`, fail-open paths include a full traceback, and successful optimizer calls log the API response JSON at INFO (`Rabbit BQ Optimizer: optimization result=...`). Default: off.
@@ -132,11 +187,7 @@ You can set the configuration in two ways:
 ```bash
 airflow variables set rabbit_bq_optimizer_config '{
     "enabled": true,
-    "default_pricing_mode": "on_demand",
-    "reservation_ids": [
-        "project:region.reservation-name1",
-        "project:region.reservation-name2"
-    ],
+    "default_pricing_mode": "slot_based",
     "dag_whitelist": [
         "my_etl_dag",
         "my_analytics_dag"
@@ -256,7 +307,7 @@ A setup script `setup_local_test.sh` is provided in the root directory to help y
 
 2. **Variable setup**
    - Set the `rabbit_bq_optimizer_config` variable using the sample JSON (without the API key).
-   - Confirm `default_pricing_mode` is valid. For `"on_demand"`, include at least one reservation ID.
+   - Confirm `default_pricing_mode` matches where your jobs run today (see [Choosing `default_pricing_mode`](#choosing-default_pricing_mode)). For `"on_demand"`, include at least one reservation ID. For `"slot_based"`, confirm `reservation_override_mode` is `ALLOW_ANY_OVERRIDE` on the job projects (see [the prerequisite](#prerequisite-for-slot_based-allow-on-demand-overrides-in-bigquery)).
 
 3. **DAG validation**
    - Deploy the plugin file to `$AIRFLOW_HOME/plugins`.
@@ -356,6 +407,13 @@ If you see this on job submit, the Airflow variable `rabbit_bq_optimizer_config`
    ```json
    {
        "enabled": true,
+       "default_pricing_mode": "slot_based"
+   }
+   ```
+   or, if your jobs run on-demand today:
+   ```json
+   {
+       "enabled": true,
        "default_pricing_mode": "on_demand",
        "reservation_ids": [
            "project:us-central1.reservation-name1",
@@ -364,6 +422,18 @@ If you see this on job submit, the Airflow variable `rabbit_bq_optimizer_config`
    }
    ```
 3. Verified the JSON is properly formatted without any syntax errors
+
+### Override to 'none' is not enabled
+
+```
+400 Override to 'none' is not enabled. The option 'reservation_override_mode' is set to 'RESERVATION_OVERRIDE_MODE_UNSPECIFIED'.
+```
+
+BigQuery rejected a job the optimizer moved to on-demand, and the plugin resubmitted the original job. Set `reservation_override_mode` to `ALLOW_ANY_OVERRIDE` on the job's project and region, as described in [the `"slot_based"` prerequisite](#prerequisite-for-slot_based-allow-on-demand-overrides-in-bigquery).
+
+### Jobs are moved onto a reservation instead of to on-demand
+
+If your jobs already run on reservations and the optimizer assigns them to the reservation in `reservation_ids` (decision `slot_based_cheaper_assigned_to_reservation`), `default_pricing_mode` is set to `"on_demand"` by mistake. Switch it to `"slot_based"` and remove `reservation_ids`. See [Choosing `default_pricing_mode`](#choosing-default_pricing_mode).
 
 ## Development
 
