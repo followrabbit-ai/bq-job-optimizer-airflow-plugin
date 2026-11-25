@@ -371,9 +371,28 @@ The retry is logged as a warning (`Rabbit BQ Optimizer: re-routed job failed on 
 limit ... Retrying once with the original configuration.`) and the retried job carries the
 label `rabbit-routing-retry: applied`.
 
-**Partial execution.** A multi-statement script can fail on statement N after statements 1
-to N-1 already ran. The retry runs the whole script again from the start, exactly as an
-Airflow task retry would, so scripts should be safe to re-run (idempotent).
+**Scripts.** A multi-statement script can fail on statement N after statements 1 to N-1
+already ran, and the retry runs the whole script again from the start. So a script is retried
+only when none of the statements that ran before the failure changed persistent data for good.
+The plugin lists the script's statements (its child jobs) and accepts each statement that
+succeeded only if it is:
+
+- a `SELECT`, including the evaluations behind `DECLARE ... DEFAULT` and `SET var = (...)`;
+- a write to a script `TEMP` table;
+- a DML statement (`INSERT`, `UPDATE`, `DELETE`, `MERGE`, `TRUNCATE`) inside a transaction that
+  did not commit. When a script fails inside a transaction, BigQuery rolls the transaction back,
+  and so does an explicit `ROLLBACK TRANSACTION`. A transaction counts as committed when the script
+  ran `COMMIT TRANSACTION` for it, including from an exception handler. Each transaction in a
+  script is judged on its own.
+
+Anything else blocks the retry: a write to a real table outside a transaction, a write in a
+committed transaction, any statement the plugin cannot classify (for example `EXPORT DATA`), a
+script that ran in a session (a transaction there can stay open and commit after the job fails),
+and a failure to read the job or list its statements. Statements inside a `CALL`ed procedure are
+checked the same way. Listing your own jobs needs no extra IAM permission. When the retry is
+skipped, the original error surfaces exactly as before and a warning says why (`... not retrying
+it on the original configuration: <reason>`). A single-statement job that failed wrote nothing,
+so it is always retried.
 
 Jobs submitted by calling `BigQueryHook.insert_job` directly, or by other operators, are not
 covered: the plugin does not see their result. A direct call with `nowait=False` falls back
