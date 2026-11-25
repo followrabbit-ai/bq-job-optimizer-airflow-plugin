@@ -249,10 +249,16 @@ To test a specific Airflow version without installing it, run the suite in the o
 | Job Rabbit left in place fails on a quota | One job, no retry, task fails |
 | Rabbit API returns an error | The original job is submitted, task succeeds |
 | Job routed to a pool project | One job, in the pool project, task succeeds |
+| Moved script fails on a custom quota after statements that only read or write `TEMP` tables | Retried once on the original configuration, task succeeds |
+| Same, after a write in a transaction that was still open (also when an earlier, committed transaction touched only `TEMP` tables) | Retried once on the original configuration, task succeeds |
+| Same, after a write outside a transaction, or in a transaction that committed (also when a later transaction is the one that failed) | One job, no retry, task fails, the task log says why |
+| Same, for a script in a session, or when its statements cannot be listed or read | One job, no retry, task fails, the task log says why |
 
-The plugin's connection and variable are stored in the metadata database, as in production. The DAG sets `allow_nested_operators=False`, so a task also fails if the plugin breaks Airflow's executor safeguard. Set `AIRFLOW__DATABASE__SQL_ALCHEMY_CONN` to a Postgres database to run the tasks in parallel, as CI and `test_in_docker.sh` do; the default SQLite database also works.
+For scripts, the fake BigQuery lists each scenario's statements as child jobs (`SCRIPTS` in `e2e/fake_servers.py`), in the shape real BigQuery reports them.
 
-When you add behaviour, add a scenario: a marker in `e2e/fake_servers.py`, the marker in `SCENARIOS` in the DAG, and the expected result in `EXPECTED` in `e2e/run_e2e.py`.
+The plugin's connection and variable are stored in the metadata database, as in production. The DAG sets `allow_nested_operators=False`, so a task also fails if the plugin breaks Airflow's executor safeguard. Set `AIRFLOW__DATABASE__SQL_ALCHEMY_CONN` to a Postgres database to run the tasks in parallel, as CI and `test_in_docker.sh` do; the default SQLite database also works. On macOS, run it with `test_in_docker.sh`: started directly, `airflow standalone` forks log-server workers that crash in a loop there.
+
+When you add behaviour, add a scenario: a marker in `e2e/fake_servers.py`, the marker in `SCENARIOS` (or `SCRIPT_SCENARIOS`) in the DAG, and the expected result in `EXPECTED` in `e2e/run_e2e.py`.
 
 ### Manual Validation Steps
 

@@ -32,6 +32,7 @@ SOURCE = "e2e-source-project"
 TIMEOUT_SECONDS = 600
 API_SERVER_PORT = 8080
 TERMINAL = {"success", "failed", "upstream_failed", "skipped", "removed"}
+NOT_RETRYING = "not retrying it on the original configuration"  # the plugin's warning
 
 # scenario -> (final task state, [(project, on_demand, retry_label, job fails)] in order)
 MOVED_THEN_RETRIED = [(SOURCE, True, None, True), (SOURCE, False, "applied", False)]
@@ -51,7 +52,26 @@ EXPECTED = {
     "apidown": ("success", [(SOURCE, False, None, False)]),
     # Routed to a pool project.
     "pool": ("success", [(fake_servers.POOL_PROJECT, False, None, False)]),
+    # Scripts (fake_servers.SCRIPTS) are retried only if no write of the failed run was applied:
+    # temp tables only, a write in a transaction left open, the same after a committed
+    # transaction that touched only temp tables.
+    "script_temp": ("success", MOVED_THEN_RETRIED),
+    "script_open_txn": ("success", MOVED_THEN_RETRIED),
+    "script_temp_txn_then_open": ("success", MOVED_THEN_RETRIED),
 }
+# Script scenarios the plugin must refuse to retry -> the reason its warning gives in the task
+# log: a write outside a transaction, a committed write (also when a later transaction is the one
+# that failed), a session, a listing that is denied or unreadable. A crash inside the check
+# would also fail the task after one job, but without the warning.
+REFUSED = {
+    "script_write": "may have written to",
+    "script_committed": "may have written to",
+    "script_write_txn_then_open": "may have written to",
+    "script_session": "it ran in a session",
+    "script_nolist": "could not list the script's statements",
+    "script_unreadable": "could not check the script's statements",
+}
+EXPECTED.update({scenario: ("failed", [(SOURCE, True, None, True)]) for scenario in REFUSED})
 
 
 def _service_account_key(path: Path) -> None:
@@ -93,6 +113,11 @@ def _task_states(run_id: str) -> dict[str, str]:
         return {}
     rows, _ = json.JSONDecoder().raw_decode(out[match.start() :])
     return {row["task_id"]: str(row["state"]) for row in rows}
+
+
+def _task_log(home: Path, task: str) -> str:
+    logs = [p for d in (home / "logs").rglob(f"task_id={task}") for p in d.rglob("*")]
+    return "".join(p.read_text(errors="replace") for p in logs if p.is_file())
 
 
 def _wait_for_api_server(standalone: subprocess.Popen) -> None:
@@ -208,9 +233,19 @@ def main() -> int:
             task = f"{scenario}_{mode}"
             got = (states.get(task), jobs_by_task.get(task, []))
             ok = got == (want_state, want_jobs)
-            print(f"{'PASS' if ok else 'FAIL'} {task:22} state={got[0]} jobs={len(got[1])}")
+            reason = REFUSED.get(scenario)
+            refused = not reason or any(
+                NOT_RETRYING in line and reason in line
+                for line in _task_log(home, task).splitlines()
+            )
+            print(
+                f"{'PASS' if ok and refused else 'FAIL'} {task:38} "
+                f"state={got[0]} jobs={len(got[1])}"
+            )
             if not ok:
                 failures.append(f"{task}: expected {(want_state, want_jobs)}, got {got}")
+            if not refused:
+                failures.append(f"{task}: no '{NOT_RETRYING}: ... {reason}' in the task log")
 
     print(f"airflow {airflow.__version__}: {'OK' if not failures else 'FAILED'}")
     if failures:
