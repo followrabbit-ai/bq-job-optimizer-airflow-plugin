@@ -1050,6 +1050,8 @@ class TestRoutingRetry(unittest.TestCase):
             "session": (False, script(failed, session=MagicMock(session_id="s1"))),
             "listing denied": (False, script(Exception("403 Access Denied: jobs.list"))),
             "incomplete listing": (False, script(failed, num_child_jobs=3)),
+            # e.g. a listed child that is not a query job: reading it raises AttributeError.
+            "statement the check can't read": (False, script(object(), failed)),
         }
 
     def test_script_is_retried_only_when_no_persistent_write_was_applied(self):

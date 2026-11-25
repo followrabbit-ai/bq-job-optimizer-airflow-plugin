@@ -512,7 +512,10 @@ def _rerun_risk(operator, job) -> str | None:
 
 
 def _safe_to_rerun(operator, job) -> bool:
-    risk = _rerun_risk(operator, job)
+    try:
+        risk = _rerun_risk(operator, job)
+    except Exception as exc:  # never let the check replace the original error
+        risk = f"could not check the script's statements: {exc!r}"
     if risk:
         logging.warning(
             "Rabbit BQ Optimizer: re-routed job failed on an on-demand limit, not retrying it on "
