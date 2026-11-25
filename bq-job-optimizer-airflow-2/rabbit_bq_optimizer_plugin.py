@@ -52,6 +52,9 @@ ON_DEMAND_LIMIT_MARKERS = ("custom quota exceeded", "billingtierlimitexceeded")
 # Script statements that write to a TEMP table report a destination in the script's own hidden
 # dataset, named `_script<hash>`.
 SCRIPT_TEMP_DATASET_PREFIX = "_script"
+TRANSACTION_CONTROL_STATEMENTS = ("BEGIN_TRANSACTION", "COMMIT_TRANSACTION", "ROLLBACK_TRANSACTION")
+# Statements whose effect a transaction rollback undoes. Anything else (EXPORT DATA, ...) blocks.
+ROLLED_BACK_DML_STATEMENTS = ("INSERT", "UPDATE", "DELETE", "MERGE", "TRUNCATE_TABLE")
 OPTIMIZER_VARIABLE = "rabbit_bq_optimizer_config"
 RABBIT_API_CONN_ID = "rabbit_api"
 RABBIT_API_BASE_URL_EXTRA_KEY = "api_base_url"
@@ -461,15 +464,20 @@ def _rerun_risk(operator, job) -> str | None:
     """Why running the failed job again could repeat a write to persistent data; None if it can't.
 
     A single statement that failed wrote nothing. A script may have run statements before the one
-    that failed, so every child job that succeeded must be a SELECT (DECLARE / SET evaluations are
-    SELECT children too) or write only to a script temp table. Fails closed: an unreadable job or
-    child list, or any other successful statement (a persistent write, BEGIN / COMMIT, EXPORT DATA,
-    ...) blocks the retry. Statements inside a CALLed procedure are children of the script too.
-    Listing your own jobs needs no IAM permission (jobs.list reference)."""
+    that failed, so each child job that succeeded must be a SELECT (DECLARE / SET evaluations are
+    SELECT children too), a write to a script temp table, or a DML statement in a transaction that
+    did not commit. When a script fails, BigQuery rolls back its open transaction (a ROLLBACK child
+    shows it); every child in a transaction carries its id, so it committed if and only if a
+    COMMIT_TRANSACTION child has that id. Fails closed: a job in a session (a transaction there
+    outlives the job), an unreadable job or child list, a committed or autocommitted persistent
+    write, or any statement not classified here blocks the retry. Statements inside a CALLed
+    procedure are children of the script too. Listing your own jobs needs no IAM permission."""
     if job is None:
         return "the failed job could not be read"
     if job.statement_type != "SCRIPT":
         return None
+    if job.session_info is not None:
+        return "it ran in a session, where a transaction can stay open after the job fails"
     try:
         from airflow.providers.google.cloud.hooks.bigquery import BigQueryHook
 
@@ -479,16 +487,27 @@ def _rerun_risk(operator, job) -> str | None:
         children = list(client.list_jobs(project=job.project, parent_job=job.job_id))
     except Exception as exc:
         return f"could not list the script's statements: {exc}"
-    if job.state != "DONE" or len(children) != job.num_child_jobs:
+    # numChildJobs does not count the ROLLBACK child BigQuery adds when the script fails.
+    if job.state != "DONE" or len(children) < job.num_child_jobs:
         return f"listed {len(children)} of {job.num_child_jobs} statements ({job.state})"
+
+    def transaction(child):
+        info = getattr(child, "transaction_info", None)
+        return info.transaction_id if info else None
+
+    committed = {transaction(c) for c in children if c.statement_type == "COMMIT_TRANSACTION"}
     for child in children:
-        if child.error_result or getattr(child, "statement_type", None) == "SELECT":
-            continue
+        kind = getattr(child, "statement_type", None)
         target = getattr(child, "destination", None)
-        if target is None or not target.dataset_id.startswith(SCRIPT_TEMP_DATASET_PREFIX):
-            kind = getattr(child, "statement_type", None)
-            written = target.path if target else "persistent data"
-            return f"statement {child.job_id} ({kind}) ran and may have written to {written}"
+        if (
+            child.error_result
+            or kind in TRANSACTION_CONTROL_STATEMENTS + ("SELECT",)
+            or (target is not None and target.dataset_id.startswith(SCRIPT_TEMP_DATASET_PREFIX))
+            or (kind in ROLLED_BACK_DML_STATEMENTS and transaction(child) not in committed | {None})
+        ):
+            continue
+        written = target.path if target else "persistent data"
+        return f"statement {child.job_id} ({kind}) ran and may have written to {written}"
     return None
 
 

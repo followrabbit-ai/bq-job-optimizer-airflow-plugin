@@ -938,13 +938,15 @@ class TestRoutingRetry(unittest.TestCase):
         self.assertEqual(len(self.submits), 1)
 
     # --- Scripts: retried only when no statement before the failure wrote persistent data. ---
+    # Child-job shapes as BigQuery lists them (checked on real scripts, AIT-166).
 
-    def _script(self, *children, num_child_jobs=None):
+    def _script(self, *children, num_child_jobs=None, session=None):
         """A failed script parent and a get_client patch listing ``children`` as its statements."""
         self.failed_job = MagicMock(
             statement_type="SCRIPT",
             state="DONE",
             num_child_jobs=len(children) if num_child_jobs is None else num_child_jobs,
+            session_info=session,
             error_result=QUOTA_ERROR,
             errors=[QUOTA_ERROR],
         )
@@ -956,7 +958,7 @@ class TestRoutingRetry(unittest.TestCase):
         return patch.object(self.hook_cls, "get_client", return_value=client)
 
     @staticmethod
-    def _child(statement_type, table=None, error=None):
+    def _child(statement_type, table=None, error=None, txn=None):
         from google.cloud.bigquery import TableReference
 
         return MagicMock(
@@ -964,70 +966,130 @@ class TestRoutingRetry(unittest.TestCase):
             statement_type=statement_type,
             destination=TableReference.from_string(table) if table else None,
             error_result=error,
+            transaction_info=MagicMock(transaction_id=txn) if txn else None,
         )
 
-    def _safe_script(self):
-        temp = "p._script0d5616fb3da5ea88.t"
-        return self._script(
-            self._child("CREATE_TABLE_AS_SELECT", temp),
-            self._child("INSERT", temp),
-            self._child("SELECT", "p._5f515d049d096bd0.anon1f3c"),  # SET v = (SELECT ...)
-            self._child("DELETE", "p.ds.events", error=QUOTA_ERROR),  # the statement that failed
-        )
+    def _transaction(self, txn, *statements, end="COMMIT_TRANSACTION"):
+        """BEGIN, ``(statement_type, table)`` statements and ``end`` (None: still open)."""
+        children = [self._child("BEGIN_TRANSACTION", txn=txn)]
+        children += [self._child(kind, table, txn=txn) for kind, table in statements]
+        return children + ([self._child(end, txn=txn)] if end else [])
 
-    def _unsafe_scripts(self):
+    def _failing_in(self, txn):
+        """The rejected statement, then the ROLLBACK BigQuery adds (not counted in numChildJobs)."""
+        return [
+            self._child("DELETE", "p.ds.events", error=QUOTA_ERROR, txn=txn),
+            self._child("ROLLBACK_TRANSACTION", txn=txn),
+        ]
+
+    def _scripts(self):
+        """name -> (retried?, script patch factory)."""
+        temp, persistent = "p._script0d5616fb3da5ea88.t", "p.ds.log"
         failed = self._child("DELETE", "p.ds.events", error=QUOTA_ERROR)
+
+        def script(*children, **kwargs):
+            return lambda: self._script(*children, **kwargs)
+
+        def failing_after(*children):  # the script failed inside the last, open transaction
+            listed = [*children, *self._failing_in("t9")]
+            return script(*listed, num_child_jobs=len(listed) - 1)
+
         return {
-            "persistent write": lambda: self._script(self._child("INSERT", "p.ds.log"), failed),
-            "transaction": lambda: self._script(self._child("BEGIN_TRANSACTION"), failed),
-            "listing denied": lambda: self._script(Exception("403 Access Denied: jobs.list")),
-            "incomplete listing": lambda: self._script(failed, num_child_jobs=3),
+            "temp writes and reads": (
+                True,
+                script(
+                    self._child("CREATE_TABLE_AS_SELECT", temp),
+                    self._child("INSERT", temp),
+                    self._child("SELECT", "p._5f515d049d096bd0.anon1f3c"),  # SET v = (SELECT)
+                    failed,
+                ),
+            ),
+            "uncommitted transaction": (
+                True,
+                failing_after(*self._transaction("t9", ("INSERT", persistent), end=None)),
+            ),
+            "explicit rollback": (
+                True,
+                script(
+                    *self._transaction("t1", ("INSERT", persistent), end="ROLLBACK_TRANSACTION"),
+                    failed,
+                ),
+            ),
+            "committed temp transaction, then failing one": (
+                True,
+                failing_after(
+                    *self._transaction("t1", ("INSERT", temp)),
+                    *self._transaction("t9", ("MERGE", persistent), end=None),
+                ),
+            ),
+            "autocommitted write": (False, script(self._child("INSERT", persistent), failed)),
+            "committed transaction": (
+                False,
+                script(*self._transaction("t1", ("INSERT", persistent)), failed),
+            ),
+            "committed persistent transaction, then failing one": (
+                False,
+                failing_after(
+                    *self._transaction("t1", ("INSERT", persistent)),
+                    *self._transaction("t9", ("INSERT", temp), end=None),
+                ),
+            ),
+            "exception handler commits": (
+                False,
+                script(
+                    self._child("BEGIN_TRANSACTION", txn="t1"),
+                    self._child("INSERT", persistent, txn="t1"),
+                    self._child("SELECT", error=QUOTA_ERROR, txn="t1"),
+                    self._child("COMMIT_TRANSACTION", txn="t1"),
+                ),
+            ),
+            "statement a rollback can't undo": (
+                False,
+                failing_after(*self._transaction("t9", ("EXPORT_DATA", None), end=None)),
+            ),
+            "session": (False, script(failed, session=MagicMock(session_id="s1"))),
+            "listing denied": (False, script(Exception("403 Access Denied: jobs.list"))),
+            "incomplete listing": (False, script(failed, num_child_jobs=3)),
         }
 
-    def test_script_with_only_temp_and_read_statements_is_retried(self):
-        op = self._operator()
-        with self._safe_script() as get_client:
-            self._run(lambda: self._execute(op), errors=[QUOTA_ERROR, None])
-        self._assert_retried_on_original(op)
-        get_client.return_value.list_jobs.assert_called_once_with(
-            project=SOURCE_PROJECT, parent_job=self.submits[0]["kwargs"]["job_id"]
-        )
-
-    def test_script_that_may_have_written_persistent_data_is_not_retried(self):
+    def test_script_is_retried_only_when_no_persistent_write_was_applied(self):
         from google.api_core.exceptions import BadRequest
 
-        for name, script in self._unsafe_scripts().items():
+        for name, (retried, script) in self._scripts().items():
             self.setUp()  # _run patches the classes once per test
-            with self.subTest(name), script():
+            with self.subTest(name), script() as get_client:
+                op = self._operator()
+                if retried:
+                    self._run(lambda op=op: self._execute(op), errors=[QUOTA_ERROR, None])
+                    self._assert_retried_on_original(op)
+                    get_client.return_value.list_jobs.assert_called_once_with(
+                        project=SOURCE_PROJECT, parent_job=self.submits[0]["kwargs"]["job_id"]
+                    )
+                    continue
                 with self.assertRaises(BadRequest) as ctx:
                     with self.assertLogs(level="WARNING") as logs:
-                        self._run(lambda: self._execute(self._operator()), errors=[QUOTA_ERROR])
+                        self._run(lambda op=op: self._execute(op), errors=[QUOTA_ERROR])
                 self.assertIn(QUOTA_MESSAGE, str(ctx.exception))  # the original error surfaces
                 self.assertEqual(len(self.submits), 1)
                 self.assertTrue(any("not retrying" in line for line in logs.output))
 
-    def test_deferrable_script_is_retried_only_when_safe(self):
+    def test_deferrable_script_is_retried_only_when_no_persistent_write_was_applied(self):
         from airflow.exceptions import AirflowException, TaskDeferred
 
         event = {"status": "error", "message": QUOTA_MESSAGE}
-        with self._safe_script():
-            deferred = self._defer(self._operator(deferrable=True), errors=[None, None])
-            resumed = self._operator(deferrable=True)
-            with self.assertRaises(TaskDeferred):
-                resumed.execute_complete(
-                    TestPluginOptimization._execute_context(resumed), event, **deferred.kwargs
-                )
-        self._assert_retried_on_original(resumed)
-
-        for name, script in self._unsafe_scripts().items():
+        for name, (retried, script) in self._scripts().items():
             self.setUp()
             with self.subTest(name), script():
-                deferred = self._defer(self._operator(deferrable=True), errors=[None])
+                deferred = self._defer(self._operator(deferrable=True), errors=[None, None])
                 resumed = self._operator(deferrable=True)
+                context = TestPluginOptimization._execute_context(resumed)
+                if retried:
+                    with self.assertRaises(TaskDeferred):
+                        resumed.execute_complete(context, event, **deferred.kwargs)
+                    self._assert_retried_on_original(resumed)
+                    continue
                 with self.assertRaises(AirflowException) as ctx:
-                    resumed.execute_complete(
-                        TestPluginOptimization._execute_context(resumed), event, **deferred.kwargs
-                    )
+                    resumed.execute_complete(context, event, **deferred.kwargs)
                 self.assertIn(QUOTA_MESSAGE, str(ctx.exception))
                 self.assertEqual(len(self.submits), 1)
 

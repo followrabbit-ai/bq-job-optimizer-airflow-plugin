@@ -16,9 +16,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   and `billingTierLimitExceeded`. Works for deferrable and non-deferrable operators. Other errors
   and jobs Rabbit did not move are not retried, and a failed retry surfaces without a second
   retry. The retried job is labelled `rabbit-routing-retry: applied`. A script is retried only if
-  every statement that succeeded before the failure was a `SELECT` or wrote only to a script
-  `TEMP` table (checked by listing its child jobs); otherwise, or if the check cannot be made,
-  the original error surfaces as before. Previously the plugin only fell back
+  no statement before the failure changed persistent data for good (checked by listing its child
+  jobs): each statement that succeeded must be a `SELECT`, a write to a script `TEMP` table, or a
+  DML statement in a transaction that did not commit (rolled back on failure or explicitly).
+  Otherwise, for scripts in a session, or if the check cannot be made, the original error
+  surfaces as before. Previously the plugin only fell back
   when the optimized *submit* raised, so these failures repeated on every Airflow retry.
 
 ## [1.1.5] - 2026-10-16
