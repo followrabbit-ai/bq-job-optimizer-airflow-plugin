@@ -138,7 +138,7 @@ If your projects run on-demand (billed per TiB scanned, no reservation assignmen
 Common mistakes:
 
 - **Using `"on_demand"` because you want jobs moved to on-demand.** If your jobs already run on reservations, this is the wrong setting: the optimizer assumes they run on-demand and pins them onto the reservation in `reservation_ids`, including jobs from projects assigned to *other* reservations. No job is ever moved to on-demand. Use `"slot_based"`.
-- **Setting `reservation_ids` with `"slot_based"`.** When a reservation is listed for the job's region, it is used for pricing instead of the reservation the job's project is assigned to, so jobs on other reservations are priced at the wrong rate. Leave it out unless Rabbit asks you to set it.
+- **Setting `reservation_ids` with `"slot_based"`.** When a reservation is listed for the job's region, it can be used for pricing instead of the reservation the job's project is assigned to, so jobs on other reservations may be priced at the wrong rate. Leave it out unless Rabbit asks you to set it.
 - **One setting for mixed environments.** The setting applies to every job the plugin sees in this Airflow environment. If some projects run on reservations and others on-demand, contact Rabbit before enabling the plugin.
 
 ### Prerequisite for `"slot_based"`: allow on-demand overrides in BigQuery
