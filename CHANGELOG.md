@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.1.6] - 2026-11-25
+
 ### Added
 - **Routing retry.** When a job that Rabbit moved to on-demand (reservation `none`, a pool billing
   project, or a statement-level rewrite) is accepted by BigQuery and then fails on an
