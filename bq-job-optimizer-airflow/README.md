@@ -12,6 +12,17 @@ This Airflow plugin automatically optimizes BigQuery job configurations using th
 
 Already running an older version? See [Updating](#updating).
 
+## Supported versions
+
+One package supports Airflow 2 and Airflow 3. CI runs the unit tests and an end-to-end test (a real Airflow running a DAG) on every version in this table:
+
+| Airflow | Python | `apache-airflow-providers-google` tested |
+| --- | --- | --- |
+| 2.9, 2.10, 2.11 | 3.9 – 3.12 | 10.17, 12.0, 20.0 |
+| 3.1, 3.2, 3.3, 3.4 | 3.10 – 3.13 (Airflow 3.4 needs 3.11+) | 20.0 – 22.8 |
+
+The plugin behaves the same on both major versions; installation and configuration do not differ. Airflow 3.0 is not supported: see [Airflow 3 notes](#airflow-3-notes).
+
 ## Installation
 
 ### Option A: PyPI (recommended)
@@ -20,21 +31,21 @@ Already running an older version? See [Updating](#updating).
    - If using `requirements.txt`:
      ```txt
      rabbit-bq-job-optimizer==0.1.19
-     rabbit-bq-optimizer-airflow-plugin==1.1.6
+     rabbit-bq-optimizer-airflow-plugin==1.2.0
      ```
    - If using `constraints.txt`:
      ```txt
      rabbit-bq-job-optimizer==0.1.19
-     rabbit-bq-optimizer-airflow-plugin==1.1.6
+     rabbit-bq-optimizer-airflow-plugin==1.2.0
      ```
    - If using a custom Docker image, add to your Dockerfile:
      ```dockerfile
-     RUN pip install rabbit-bq-job-optimizer==0.1.19 rabbit-bq-optimizer-airflow-plugin==1.1.6
+     RUN pip install rabbit-bq-job-optimizer==0.1.19 rabbit-bq-optimizer-airflow-plugin==1.2.0
      ```
 
    The plugin registers via Airflow's plugin entry point — no file copy into `plugins/` is required.
 
-2. Restart your Airflow scheduler, workers, and webserver to load the plugin. If you use deferrable `BigQueryInsertJobOperator`, restart the triggerer as well.
+2. Restart your Airflow scheduler, workers, and webserver (on Airflow 3: the API server and DAG processor) to load the plugin. If you use deferrable `BigQueryInsertJobOperator`, restart the triggerer as well.
 
 ### Option B: Copy into `plugins/`
 
@@ -46,7 +57,7 @@ Already running an older version? See [Updating](#updating).
 
 2. Copy the plugin file into your Airflow plugins directory:
    ```bash
-   cp bq-job-optimizer-airflow-2/rabbit_bq_optimizer_plugin.py "$AIRFLOW_HOME/plugins/"
+   cp bq-job-optimizer-airflow/rabbit_bq_optimizer_plugin.py "$AIRFLOW_HOME/plugins/"
    ```
 
 3. Restart your Airflow scheduler, workers, and webserver (and triggerer if using deferrable operators).
@@ -59,7 +70,7 @@ Update to the new package versions in your environment dependencies:
 
 ```txt
 rabbit-bq-job-optimizer==0.1.19
-rabbit-bq-optimizer-airflow-plugin==1.1.6
+rabbit-bq-optimizer-airflow-plugin==1.2.0
 ```
 
 Apply the update using your platform's usual process, then restart Airflow components (including the triggerer if you use deferrable `BigQueryInsertJobOperator`). Your `rabbit_api` connection, `rabbit_bq_optimizer_config` variable, and DAGs are unchanged. If optimization fails, the plugin still submits the original job (fail-open).
@@ -196,47 +207,7 @@ A setup script `setup_local_test.sh` is provided in the root directory to help y
    - `Rabbit BQ Optimizer: optimization result=...` on job submit when `debug` is true (INFO), or at DEBUG when `debug` is off (or failure if using dummy key/URL)
 
 4. **Run automated tests:**
-   After setup, you can run automated tests to validate the plugin:
-
-   **Test connection loading:**
-   ```bash
-   source venv/bin/activate
-   export AIRFLOW_HOME=$(pwd)/airflow_home
-   cd bq-job-optimizer-airflow-2
-   python test_plugin_connection.py
-   ```
-   This verifies that the plugin can load credentials from the Airflow connection.
-
-   **Test DAG execution (full integration):**
-   ```bash
-   source venv/bin/activate
-   export AIRFLOW_HOME=$(pwd)/airflow_home
-   cd bq-job-optimizer-airflow-2
-   python test_dag_execution.py
-   ```
-   This simulates a DAG execution and verifies that:
-   - The plugin intercepts BigQuery jobs
-   - The Rabbit optimization API is called with connection credentials
-   - The optimized configuration is used
-
-   **Test DAG whitelist filtering:**
-   ```bash
-   source venv/bin/activate
-   export AIRFLOW_HOME=$(pwd)/airflow_home
-   cd bq-job-optimizer-airflow-2
-   python test_dag_whitelist.py
-   ```
-   This verifies the optional `dag_whitelist` feature:
-   - Optimization runs for all DAGs when whitelist is absent or empty
-   - Only whitelisted DAGs are optimized when the list is set
-   - Safe fallback (skips optimization) when whitelist is set but Airflow context is unavailable
-
-   **Test plugin optimization (unit, no real BQ):**
-   ```bash
-   source venv/bin/activate
-   export AIRFLOW_HOME=$(pwd)/airflow_home
-   python -m unittest bq-job-optimizer-airflow-2/test_plugin_optimization.py -v
-   ```
+   See [Automated tests](#automated-tests).
 
 5. **Cleanup (optional):**
    To remove the test environment (venv and airflow_home directories):
@@ -247,6 +218,47 @@ A setup script `setup_local_test.sh` is provided in the root directory to help y
    ```bash
    ./setup_local_test.sh -c
    ```
+
+### Automated tests
+
+The same script runs locally and in CI, against whichever Airflow is installed in the current environment:
+
+```bash
+bq-job-optimizer-airflow/run_tests.sh unit   # unit tests, no network
+bq-job-optimizer-airflow/run_tests.sh e2e    # end-to-end test
+bq-job-optimizer-airflow/run_tests.sh        # both
+```
+
+To test a specific Airflow version without installing it, run the suite in the official Airflow image (needs Docker):
+
+```bash
+./test_in_docker.sh 3.4.0 3.12     # <airflow version> [python version] [unit|e2e|all]
+./test_in_docker.sh 2.9.1
+```
+
+**Unit tests** (`test_*.py`) mock BigQuery and the Rabbit API and cover connection loading, the DAG whitelist, routing, fail-open, the dry-run guard and the routing retry.
+
+**The end-to-end test** (`e2e/run_e2e.py`) starts a real Airflow with `airflow standalone` (scheduler and triggerer; on Airflow 3 also the API server and DAG processor), with the plugin installed from the package. It runs the DAG `e2e/dags/rabbit_e2e.py` against a fake BigQuery API and a fake Rabbit API (`e2e/fake_servers.py`), then checks the final state of every task and the exact jobs each task submitted. Each scenario runs once as a normal task and once as a deferrable task:
+
+| Scenario | Expected |
+| --- | --- |
+| Job moved to on-demand | One job, on-demand, task succeeds |
+| Moved job fails on a custom quota or billing tier limit | Retried once on the original configuration with `rabbit-routing-retry: applied`, task succeeds |
+| The retry fails too | Task fails after exactly two jobs |
+| SQL error | One job, no retry, task fails |
+| Job Rabbit left in place fails on a quota | One job, no retry, task fails |
+| Rabbit API returns an error | The original job is submitted, task succeeds |
+| Job routed to a pool project | One job, in the pool project, task succeeds |
+| Moved script fails on a custom quota after statements that only read or write `TEMP` tables | Retried once on the original configuration, task succeeds |
+| Same, after a write in a transaction that was still open (also when an earlier, committed transaction touched only `TEMP` tables) | Retried once on the original configuration, task succeeds |
+| Same, after a write outside a transaction, or in a transaction that committed (also when a later transaction is the one that failed) | One job, no retry, task fails, the task log says why |
+| Same, for a script in a session, or when its statements cannot be listed or read | One job, no retry, task fails, the task log says why |
+
+For scripts, the fake BigQuery lists each scenario's statements as child jobs (`SCRIPTS` in `e2e/fake_servers.py`), in the shape real BigQuery reports them.
+
+The plugin's connection and variable are stored in the metadata database, as in production. The DAG sets `allow_nested_operators=False`, so a task also fails if the plugin breaks Airflow's executor safeguard. Set `AIRFLOW__DATABASE__SQL_ALCHEMY_CONN` to a Postgres database to run the tasks in parallel, as CI and `test_in_docker.sh` do; the default SQLite database also works. On macOS, run it with `test_in_docker.sh`: started directly, `airflow standalone` forks log-server workers that crash in a loop there.
+
+When you add behaviour, add a scenario: a marker in `e2e/fake_servers.py`, the marker in `SCENARIOS` (or `SCRIPT_SCENARIOS`) in the DAG, and the expected result in `EXPECTED` in `e2e/run_e2e.py`.
 
 ### Manual Validation Steps
 
@@ -448,7 +460,15 @@ The hooks will automatically:
 
 GitHub Actions automatically runs on every push and pull request:
 - **Linting and Formatting**: Checks code style with Black and Ruff
-- **Tests**: Runs test suite on Python 3.9, 3.10, 3.11, and 3.12
+- **Tests**: Runs the unit tests and the end-to-end test on every supported Airflow version (see [Supported versions](#supported-versions)), on the oldest and newest Python of each major version
+- **Latest Airflow**: One extra, non-blocking row installs the newest Airflow on PyPI. The workflow also runs weekly, so a new Airflow release that breaks the plugin shows up without a pull request
+
+To support a new Airflow version, add a row to the matrix in `.github/workflows/ci.yml` and to the table above.
+
+### Airflow 3 notes
+
+- **Airflow 3.0 is not supported.** With the Google provider that Airflow 3.0 pins (17.1), deferrable `BigQueryInsertJobOperator` tasks never complete, with or without the plugin. Use Airflow 3.1 or later.
+- **Task retries can reconnect to a running job.** With recent Google providers on Airflow 3, a retried task can reconnect to a BigQuery job that is still running instead of submitting a new one. The plugin only sees jobs at submit, so a reconnected job is not optimized again and the [routing retry](#routing-retry) does not apply to it.
 
 ## Uninstalling
 

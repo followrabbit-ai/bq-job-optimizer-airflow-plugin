@@ -74,7 +74,7 @@ class TestPluginOptimization(unittest.TestCase):
 
     @contextmanager
     def _patch_plugin(self, plugin_module, *, mock_client):
-        from airflow.models import Variable
+        from rabbit_bq_optimizer_plugin import Variable
 
         with (
             patch.object(
@@ -321,8 +321,8 @@ class TestPluginOptimization(unittest.TestCase):
         import importlib
 
         import rabbit_bq_optimizer_plugin as plugin_module
-        from airflow.models import Variable
         from airflow.providers.google.cloud.hooks.bigquery import BigQueryHook
+        from rabbit_bq_optimizer_plugin import Variable
 
         importlib.reload(plugin_module)
 
@@ -368,8 +368,8 @@ class TestPluginOptimization(unittest.TestCase):
         import importlib
 
         import rabbit_bq_optimizer_plugin as plugin_module
-        from airflow.models import Variable
         from airflow.providers.google.cloud.hooks.bigquery import BigQueryHook
+        from rabbit_bq_optimizer_plugin import Variable
 
         importlib.reload(plugin_module)
 
@@ -410,8 +410,8 @@ class TestPluginOptimization(unittest.TestCase):
         import importlib
 
         import rabbit_bq_optimizer_plugin as plugin_module
-        from airflow.models import Variable
         from airflow.providers.google.cloud.hooks.bigquery import BigQueryHook
+        from rabbit_bq_optimizer_plugin import Variable
 
         importlib.reload(plugin_module)
 
@@ -455,8 +455,8 @@ class TestPluginOptimization(unittest.TestCase):
         import importlib
 
         import rabbit_bq_optimizer_plugin as plugin_module
-        from airflow.models import Variable
         from airflow.providers.google.cloud.hooks.bigquery import BigQueryHook
+        from rabbit_bq_optimizer_plugin import Variable
 
         importlib.reload(plugin_module)
 
@@ -496,8 +496,8 @@ class TestPluginOptimization(unittest.TestCase):
         import importlib
 
         import rabbit_bq_optimizer_plugin as plugin_module
-        from airflow.models import Variable
         from airflow.providers.google.cloud.hooks.bigquery import BigQueryHook
+        from rabbit_bq_optimizer_plugin import Variable
 
         importlib.reload(plugin_module)
 
@@ -541,7 +541,6 @@ class TestPluginOptimization(unittest.TestCase):
         import importlib
 
         import rabbit_bq_optimizer_plugin as plugin_module
-        from airflow.models import Variable
         from airflow.providers.google.cloud.hooks.bigquery import BigQueryHook
 
         importlib.reload(plugin_module)
@@ -558,13 +557,12 @@ class TestPluginOptimization(unittest.TestCase):
         mock_client = MagicMock()
 
         with (
-            patch.object(
-                Variable,
-                "get",
-                side_effect=KeyError("Variable rabbit_bq_optimizer_config does not exist"),
-            ),
+            # Real lookup of a missing variable: Airflow 2 raises KeyError, Airflow 3 raises
+            # AirflowRuntimeError. Both must fall back to the original job.
+            patch.dict(os.environ),
             patch.object(plugin_module, "RabbitBQJobOptimizer", return_value=mock_client),
         ):
+            os.environ.pop("AIRFLOW_VAR_RABBIT_BQ_OPTIMIZER_CONFIG", None)
             plugin_module.patch_bigquery_hook()
 
             hook = BigQueryHook(gcp_conn_id="google_cloud_default")
@@ -577,8 +575,8 @@ class TestPluginOptimization(unittest.TestCase):
         import importlib
 
         import rabbit_bq_optimizer_plugin as plugin_module
-        from airflow.models import Variable
         from airflow.providers.google.cloud.hooks.bigquery import BigQueryHook
+        from rabbit_bq_optimizer_plugin import Variable
 
         importlib.reload(plugin_module)
 
@@ -737,7 +735,7 @@ class TestRoutingRetry(unittest.TestCase):
             optimizationPerformed=True,
         )
 
-        from airflow.models import Variable
+        from rabbit_bq_optimizer_plugin import Variable
 
         with (
             patch.object(
@@ -833,14 +831,15 @@ class TestRoutingRetry(unittest.TestCase):
         self.assertEqual(len(self.submits), 1)
 
     def _defer(self, op, **run_kwargs):
-        from airflow.exceptions import TaskDeferred
+        from rabbit_bq_optimizer_plugin import TaskDeferred
 
         with self.assertRaises(TaskDeferred) as ctx:
             self._run(lambda: self._execute(op), running=True, **run_kwargs)
         return ctx.exception
 
     def test_deferrable_quota_error_is_retried_and_redeferred(self):
-        from airflow.exceptions import AirflowException, TaskDeferred
+        from airflow.exceptions import AirflowException
+        from rabbit_bq_optimizer_plugin import TaskDeferred
 
         deferred = self._defer(self._operator(deferrable=True), errors=[None, None])
         moved_job = deferred.kwargs["rabbit_moved_job"]
@@ -861,7 +860,7 @@ class TestRoutingRetry(unittest.TestCase):
         self.assertEqual(len(self.submits), 2)
 
     def test_deferrable_billing_tier_error_is_identified_by_job_reason(self):
-        from airflow.exceptions import TaskDeferred
+        from rabbit_bq_optimizer_plugin import TaskDeferred
 
         deferred = self._defer(
             self._operator(deferrable=True), errors=[None, None], pool_project=POOL_BILLING_PROJECT
@@ -883,10 +882,16 @@ class TestRoutingRetry(unittest.TestCase):
     def test_executor_safeguard_token_is_forwarded(self):
         """Airflow passes its ExecutorSafeguard token only to a callable named "execute"; without
         it, operators with allow_nested_operators=False refuse to run."""
-        from airflow.exceptions import TaskDeferred
-        from airflow.models.base import _sentinel
+        from rabbit_bq_optimizer_plugin import TaskDeferred
 
-        token = {"BigQueryInsertJobOperator__sentinel": _sentinel}
+        try:  # Airflow 3
+            from airflow.sdk.bases.operator import ExecutorSafeguard
+
+            sentinel = ExecutorSafeguard.sentinel_value
+        except ImportError:  # Airflow 2
+            from airflow.models.base import _sentinel as sentinel
+
+        token = {"BigQueryInsertJobOperator__sentinel": sentinel}
         strict = {"allow_nested_operators": False}
         op = self._operator(**strict)
         context = TestPluginOptimization._execute_context(op)

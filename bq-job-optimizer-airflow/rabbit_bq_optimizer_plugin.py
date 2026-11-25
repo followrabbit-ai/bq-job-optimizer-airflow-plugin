@@ -1,5 +1,5 @@
 """
-Rabbit BQ job optimizer — Airflow 2 plugin.
+Rabbit BQ job optimizer — Airflow plugin (Airflow 2.9+ and Airflow 3).
 
 Patches ``BigQueryHook.insert_job`` so every BQ submit is optimized via the Rabbit API
 before ``jobs.insert``. Patches ``BigQueryInsertJobOperator._submit_job`` with a
@@ -21,12 +21,19 @@ import os
 from dataclasses import asdict
 from typing import Any
 
-from airflow.exceptions import AirflowException, TaskDeferred
-from airflow.hooks.base import BaseHook
-from airflow.models import Variable
+from airflow.exceptions import AirflowException
 from airflow.plugins_manager import AirflowPlugin
 from airflow.utils.log.logging_mixin import LoggingMixin
 from rabbit_bq_job_optimizer import OptimizationConfig, RabbitBQJobOptimizer
+
+try:  # Airflow 3: the Task SDK is the supported import path
+    from airflow.sdk import BaseHook, Variable, get_current_context
+    from airflow.sdk.exceptions import TaskDeferred
+except ImportError:  # Airflow 2 (and early Airflow 3.0, where the old paths still work)
+    from airflow.exceptions import TaskDeferred
+    from airflow.hooks.base import BaseHook
+    from airflow.models import Variable
+    from airflow.operators.python import get_current_context
 
 RABBIT_HOOK_PATCHED_MARKER = "_rabbit_bq_job_optimizer_hook_patched"
 RABBIT_OPERATOR_PATCHED_MARKER = "_rabbit_bq_job_optimizer_operator_patched"
@@ -216,8 +223,9 @@ def _load_optimizer_config() -> dict[str, Any] | None:
         # Keep the Variable payload as loaded for fail-open diagnostics.
         config["_raw"] = raw
         return config
-    except (KeyError, ValueError) as exc:
-        # Missing variable, bad JSON, or failed validation above.
+    except Exception as exc:
+        # Missing variable (KeyError on Airflow 2, AirflowRuntimeError on Airflow 3), bad JSON,
+        # or failed validation above.
         logging.warning("Rabbit BQ Optimizer: config error: %s. Using original job.", exc)
         return None
 
@@ -253,8 +261,6 @@ def _should_optimize_for_current_dag(config: dict[str, Any]) -> bool:
         return False
 
     try:
-        from airflow.operators.python import get_current_context
-
         dag_id = get_current_context()["dag"].dag_id
     except Exception:
         dag_id = None
