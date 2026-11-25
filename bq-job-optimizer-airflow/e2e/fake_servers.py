@@ -26,7 +26,9 @@ from urllib.parse import parse_qs, urlsplit
 BIGQUERY_PORT = 9050
 OPTIMIZER_PORT = 9051
 POOL_PROJECT = "e2e-pool-project"
-RUN_SECONDS = 2
+# Longer than a loaded runner needs to finish the task process that deferred: on Airflow 3.1 - 3.3
+# the scheduler fails a task whose trigger fires before that process has exited.
+RUN_SECONDS = 10
 JOBS: dict[str, dict] = {}  # job id -> job; insertion order is submission order
 QUOTA_MSG = (
     "Custom quota exceeded: Your usage exceeded the custom quota for QueryUsagePerDay, "

@@ -26,6 +26,7 @@ with DAG(
     start_date=datetime(2026, 1, 1),
     schedule=None,
     catchup=False,
+    max_active_tasks=8,  # keeps task start-up fast on a small CI runner (see RUN_SECONDS)
     # allow_nested_operators=False turns a missing executor-safeguard token into a task failure.
     default_args={"retries": 0, "allow_nested_operators": False},
 ) as dag:
