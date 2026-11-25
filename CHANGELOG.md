@@ -15,8 +15,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   query-usage quota (`Custom quota exceeded`, including the `invalidQuery` a script parent reports)
   and `billingTierLimitExceeded`. Works for deferrable and non-deferrable operators. Other errors
   and jobs Rabbit did not move are not retried, and a failed retry surfaces without a second
-  retry. The retried job is labelled `rabbit-routing-retry: applied`. A script that failed midway
-  is re-run from the start, as with an Airflow task retry. Previously the plugin only fell back
+  retry. The retried job is labelled `rabbit-routing-retry: applied`. A script is retried only if
+  every statement that succeeded before the failure was a `SELECT` or wrote only to a script
+  `TEMP` table (checked by listing its child jobs); otherwise, or if the check cannot be made,
+  the original error surfaces as before. Previously the plugin only fell back
   when the optimized *submit* raised, so these failures repeated on every Airflow retry.
 
 ## [1.1.5] - 2026-10-16

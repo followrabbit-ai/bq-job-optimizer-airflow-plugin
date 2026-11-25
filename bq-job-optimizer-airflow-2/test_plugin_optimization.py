@@ -701,6 +701,8 @@ class TestRoutingRetry(unittest.TestCase):
             self.submits.append({"configuration": configuration, "kwargs": dict(kwargs)})
             job = MagicMock()
             job.job_id = kwargs.get("job_id") or "mock-job"
+            job.project = kwargs.get("project_id")
+            job.location = "US"
             job.running.return_value = running
             job.state = "DONE"
             job.error_result = error
@@ -711,6 +713,16 @@ class TestRoutingRetry(unittest.TestCase):
             return job
 
         self.hook_cls.insert_job = fake_bq_submit
+        # The failed job as get_job reads it back: a single statement unless a test sets a script.
+        failed = getattr(self, "failed_job", None) or MagicMock(
+            statement_type="SELECT", error_result=errors[0], errors=[errors[0]]
+        )
+
+        def fake_get_job(hook, *, project_id, location, job_id):
+            failed.project, failed.location, failed.job_id = project_id, location, job_id
+            return failed
+
+        self.hook_cls.get_job = fake_get_job
 
         optimized_job: dict = {"configuration": {**ORIGINAL_CONFIG}}
         if reservation:
@@ -924,6 +936,100 @@ class TestRoutingRetry(unittest.TestCase):
         success = {"status": "success", "message": "Job completed", "job_id": "j1"}
         resumed.execute_complete(context, success, **deferred.kwargs)
         self.assertEqual(len(self.submits), 1)
+
+    # --- Scripts: retried only when no statement before the failure wrote persistent data. ---
+
+    def _script(self, *children, num_child_jobs=None):
+        """A failed script parent and a get_client patch listing ``children`` as its statements."""
+        self.failed_job = MagicMock(
+            statement_type="SCRIPT",
+            state="DONE",
+            num_child_jobs=len(children) if num_child_jobs is None else num_child_jobs,
+            error_result=QUOTA_ERROR,
+            errors=[QUOTA_ERROR],
+        )
+        client = MagicMock()
+        if children and isinstance(children[0], Exception):
+            client.list_jobs.side_effect = children[0]
+        else:
+            client.list_jobs.return_value = iter(children)
+        return patch.object(self.hook_cls, "get_client", return_value=client)
+
+    @staticmethod
+    def _child(statement_type, table=None, error=None):
+        from google.cloud.bigquery import TableReference
+
+        return MagicMock(
+            job_id=f"child-{statement_type}",
+            statement_type=statement_type,
+            destination=TableReference.from_string(table) if table else None,
+            error_result=error,
+        )
+
+    def _safe_script(self):
+        temp = "p._script0d5616fb3da5ea88.t"
+        return self._script(
+            self._child("CREATE_TABLE_AS_SELECT", temp),
+            self._child("INSERT", temp),
+            self._child("SELECT", "p._5f515d049d096bd0.anon1f3c"),  # SET v = (SELECT ...)
+            self._child("DELETE", "p.ds.events", error=QUOTA_ERROR),  # the statement that failed
+        )
+
+    def _unsafe_scripts(self):
+        failed = self._child("DELETE", "p.ds.events", error=QUOTA_ERROR)
+        return {
+            "persistent write": lambda: self._script(self._child("INSERT", "p.ds.log"), failed),
+            "transaction": lambda: self._script(self._child("BEGIN_TRANSACTION"), failed),
+            "listing denied": lambda: self._script(Exception("403 Access Denied: jobs.list")),
+            "incomplete listing": lambda: self._script(failed, num_child_jobs=3),
+        }
+
+    def test_script_with_only_temp_and_read_statements_is_retried(self):
+        op = self._operator()
+        with self._safe_script() as get_client:
+            self._run(lambda: self._execute(op), errors=[QUOTA_ERROR, None])
+        self._assert_retried_on_original(op)
+        get_client.return_value.list_jobs.assert_called_once_with(
+            project=SOURCE_PROJECT, parent_job=self.submits[0]["kwargs"]["job_id"]
+        )
+
+    def test_script_that_may_have_written_persistent_data_is_not_retried(self):
+        from google.api_core.exceptions import BadRequest
+
+        for name, script in self._unsafe_scripts().items():
+            self.setUp()  # _run patches the classes once per test
+            with self.subTest(name), script():
+                with self.assertRaises(BadRequest) as ctx:
+                    with self.assertLogs(level="WARNING") as logs:
+                        self._run(lambda: self._execute(self._operator()), errors=[QUOTA_ERROR])
+                self.assertIn(QUOTA_MESSAGE, str(ctx.exception))  # the original error surfaces
+                self.assertEqual(len(self.submits), 1)
+                self.assertTrue(any("not retrying" in line for line in logs.output))
+
+    def test_deferrable_script_is_retried_only_when_safe(self):
+        from airflow.exceptions import AirflowException, TaskDeferred
+
+        event = {"status": "error", "message": QUOTA_MESSAGE}
+        with self._safe_script():
+            deferred = self._defer(self._operator(deferrable=True), errors=[None, None])
+            resumed = self._operator(deferrable=True)
+            with self.assertRaises(TaskDeferred):
+                resumed.execute_complete(
+                    TestPluginOptimization._execute_context(resumed), event, **deferred.kwargs
+                )
+        self._assert_retried_on_original(resumed)
+
+        for name, script in self._unsafe_scripts().items():
+            self.setUp()
+            with self.subTest(name), script():
+                deferred = self._defer(self._operator(deferrable=True), errors=[None])
+                resumed = self._operator(deferrable=True)
+                with self.assertRaises(AirflowException) as ctx:
+                    resumed.execute_complete(
+                        TestPluginOptimization._execute_context(resumed), event, **deferred.kwargs
+                    )
+                self.assertIn(QUOTA_MESSAGE, str(ctx.exception))
+                self.assertEqual(len(self.submits), 1)
 
 
 if __name__ == "__main__":

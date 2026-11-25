@@ -49,6 +49,9 @@ RABBIT_DEFER_KWARG = "rabbit_moved_job"
 # lowercase substrings of the error text: a script parent reports the quota as `invalidQuery`, so
 # the message is the only reliable signal there.
 ON_DEMAND_LIMIT_MARKERS = ("custom quota exceeded", "billingtierlimitexceeded")
+# Script statements that write to a TEMP table report a destination in the script's own hidden
+# dataset, named `_script<hash>`.
+SCRIPT_TEMP_DATASET_PREFIX = "_script"
 OPTIMIZER_VARIABLE = "rabbit_bq_optimizer_config"
 RABBIT_API_CONN_ID = "rabbit_api"
 RABBIT_API_BASE_URL_EXTRA_KEY = "api_base_url"
@@ -430,21 +433,21 @@ def _is_on_demand_limit_error(*parts: Any) -> bool:
     return any(marker in text for marker in ON_DEMAND_LIMIT_MARKERS)
 
 
-def _failed_job_errors(operator, moved_job: dict[str, Any]) -> Any:
-    """Error details of the failed job. The deferrable trigger event carries only the message,
-    and ``billingTierLimitExceeded`` is identifiable only by its reason."""
+def _failed_job(operator, moved_job: dict[str, Any]) -> Any:
+    """The failed job as BigQuery reports it now (the operator's own job object can be stale), or
+    None. Needed for its error reason (the deferrable trigger event carries only the message, and
+    ``billingTierLimitExceeded`` is identifiable only by its reason) and for _rerun_risk."""
     try:
         from airflow.providers.google.cloud.hooks.bigquery import BigQueryHook
 
         hook = BigQueryHook(
             gcp_conn_id=operator.gcp_conn_id, impersonation_chain=operator.impersonation_chain
         )
-        job = hook.get_job(
+        return hook.get_job(
             project_id=moved_job.get("project_id"),
             location=moved_job.get("location"),
             job_id=moved_job.get("job_id"),
         )
-        return [job.error_result, job.errors]
     except Exception as exc:
         logging.warning(
             "Rabbit BQ Optimizer: could not read the failed job %s: %s",
@@ -452,6 +455,52 @@ def _failed_job_errors(operator, moved_job: dict[str, Any]) -> Any:
             exc,
         )
         return None
+
+
+def _rerun_risk(operator, job) -> str | None:
+    """Why running the failed job again could repeat a write to persistent data; None if it can't.
+
+    A single statement that failed wrote nothing. A script may have run statements before the one
+    that failed, so every child job that succeeded must be a SELECT (DECLARE / SET evaluations are
+    SELECT children too) or write only to a script temp table. Fails closed: an unreadable job or
+    child list, or any other successful statement (a persistent write, BEGIN / COMMIT, EXPORT DATA,
+    ...) blocks the retry. Statements inside a CALLed procedure are children of the script too.
+    Listing your own jobs needs no IAM permission (jobs.list reference)."""
+    if job is None:
+        return "the failed job could not be read"
+    if job.statement_type != "SCRIPT":
+        return None
+    try:
+        from airflow.providers.google.cloud.hooks.bigquery import BigQueryHook
+
+        client = BigQueryHook(
+            gcp_conn_id=operator.gcp_conn_id, impersonation_chain=operator.impersonation_chain
+        ).get_client(project_id=job.project, location=job.location)
+        children = list(client.list_jobs(project=job.project, parent_job=job.job_id))
+    except Exception as exc:
+        return f"could not list the script's statements: {exc}"
+    if job.state != "DONE" or len(children) != job.num_child_jobs:
+        return f"listed {len(children)} of {job.num_child_jobs} statements ({job.state})"
+    for child in children:
+        if child.error_result or getattr(child, "statement_type", None) == "SELECT":
+            continue
+        target = getattr(child, "destination", None)
+        if target is None or not target.dataset_id.startswith(SCRIPT_TEMP_DATASET_PREFIX):
+            kind = getattr(child, "statement_type", None)
+            written = target.path if target else "persistent data"
+            return f"statement {child.job_id} ({kind}) ran and may have written to {written}"
+    return None
+
+
+def _safe_to_rerun(operator, job) -> bool:
+    risk = _rerun_risk(operator, job)
+    if risk:
+        logging.warning(
+            "Rabbit BQ Optimizer: re-routed job failed on an on-demand limit, not retrying it on "
+            "the original configuration: %s",
+            risk,
+        )
+    return risk is None
 
 
 def patch_bigquery_insert_job_operator() -> None:
@@ -502,7 +551,7 @@ def patch_bigquery_insert_job_operator() -> None:
                 ROUTING_RETRY_LABEL: ROUTING_RETRY_APPLIED,
             },
         }
-        setattr(self, RABBIT_MOVED_ATTR, False)
+        setattr(self, RABBIT_MOVED_ATTR, None)
         setattr(self, RABBIT_NO_OPTIMIZE_ATTR, True)
         try:
             return unguarded_execute(self, context)
@@ -512,33 +561,29 @@ def patch_bigquery_insert_job_operator() -> None:
     @functools.wraps(original_execute)  # keep the name "execute": TaskInstance checks it
     def patched_execute(self, context, **kwargs):
         original_state = (self.configuration, self.project_id, self.job_id)
-        setattr(self, RABBIT_MOVED_ATTR, False)
+        setattr(self, RABBIT_MOVED_ATTR, None)
         try:
             return original_execute(self, context, **kwargs)
         except TaskDeferred as deferred:
             # A subclass with its own execute_complete may not accept the extra kwarg; leave
             # its deferral untouched (no routing retry on that path) rather than break resume.
             resumes_here = type(self).execute_complete is patched_execute_complete
-            if resumes_here and getattr(self, RABBIT_MOVED_ATTR, False):
+            moved_job = getattr(self, RABBIT_MOVED_ATTR, None)
+            if resumes_here and moved_job:
                 # execute_complete runs later (normally on a fresh operator instance) and its
                 # failure event carries only a message: hand it the moved job's coordinates.
-                deferred.kwargs = {
-                    **(deferred.kwargs or {}),
-                    RABBIT_DEFER_KWARG: {
-                        "project_id": self.project_id,
-                        "location": deferred.trigger.location,
-                        "job_id": self.job_id,
-                    },
-                }
+                deferred.kwargs = {**(deferred.kwargs or {}), RABBIT_DEFER_KWARG: moved_job}
                 # Leave the operator as a fresh instance would be, for runners that resume on
                 # the same object (dag.test()).
                 self.configuration, self.project_id, self.job_id = original_state
-                setattr(self, RABBIT_MOVED_ATTR, False)
+                setattr(self, RABBIT_MOVED_ATTR, None)
             raise
         except Exception as exc:
+            moved_job = getattr(self, RABBIT_MOVED_ATTR, None)
             if not (
-                getattr(self, RABBIT_MOVED_ATTR, False)
+                moved_job
                 and _is_on_demand_limit_error(exc, getattr(exc, "errors", None))
+                and _safe_to_rerun(self, _failed_job(self, moved_job))
             ):
                 raise
             self.configuration, self.project_id, self.job_id = original_state
@@ -546,15 +591,13 @@ def patch_bigquery_insert_job_operator() -> None:
 
     def patched_execute_complete(self, context, event, **kwargs):
         moved_job = kwargs.pop(RABBIT_DEFER_KWARG, None)
-        if (
-            moved_job
-            and event.get("status") == "error"
-            and (
+        if moved_job and event.get("status") == "error":
+            job = _failed_job(self, moved_job)
+            if (
                 _is_on_demand_limit_error(event.get("message"))
-                or _is_on_demand_limit_error(_failed_job_errors(self, moved_job))
-            )
-        ):
-            return _retry_on_original_config(self, context, event.get("message"))
+                or (job is not None and _is_on_demand_limit_error(job.error_result, job.errors))
+            ) and _safe_to_rerun(self, job):
+                return _retry_on_original_config(self, context, event.get("message"))
         return original_execute_complete(self, context, event, **kwargs)
 
     BigQueryInsertJobOperator.execute = patched_execute
@@ -616,14 +659,9 @@ def patch_bigquery_hook() -> None:
             if pool_billing_project:
                 operator.project_id = pool_billing_project
                 submit_kwargs["project_id"] = pool_billing_project
-            setattr(
-                operator,
-                RABBIT_MOVED_ATTR,
-                _placement_moved(configuration, optimized, pool_billing_project),
-            )
 
         try:
-            return original_insert_job(self, configuration=optimized, **submit_kwargs)
+            job = original_insert_job(self, configuration=optimized, **submit_kwargs)
         except Exception as exc:
             _log_failure(
                 "Rabbit BQ Optimizer: optimized submit failed: %s. Using original job.",
@@ -635,8 +673,17 @@ def patch_bigquery_hook() -> None:
             if operator is not None:
                 operator.configuration = original_operator_config
                 operator.project_id = original_operator_project
-                setattr(operator, RABBIT_MOVED_ATTR, False)
             return original_insert_job(self, configuration=configuration, **kwargs)
+
+        moved = _placement_moved(configuration, optimized, pool_billing_project)
+        if operator is not None and moved:
+            # Where the moved job runs, for the routing retry to read it if it fails.
+            setattr(
+                operator,
+                RABBIT_MOVED_ATTR,
+                {"project_id": job.project, "location": job.location, "job_id": job.job_id},
+            )
+        return job
 
     BigQueryHook.insert_job = patched_insert_job
 

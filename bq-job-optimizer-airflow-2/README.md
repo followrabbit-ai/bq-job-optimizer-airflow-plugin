@@ -365,9 +365,19 @@ The retry is logged as a warning (`Rabbit BQ Optimizer: re-routed job failed on 
 limit ... Retrying once with the original configuration.`) and the retried job carries the
 label `rabbit-routing-retry: applied`.
 
-**Partial execution.** A multi-statement script can fail on statement N after statements 1
-to N-1 already ran. The retry runs the whole script again from the start, exactly as an
-Airflow task retry would, so scripts should be safe to re-run (idempotent).
+**Scripts.** A multi-statement script can fail on statement N after statements 1 to N-1
+already ran, and the retry runs the whole script again from the start. So a script is retried
+only when none of the statements that ran before the failure can have changed persistent data.
+The plugin lists the script's statements (its child jobs) and retries only if every statement
+that succeeded is a `SELECT` (including the evaluations behind `DECLARE ... DEFAULT` and
+`SET var = (...)`) or writes only to a script `TEMP` table. Anything else blocks the retry: a
+write to a real table (DML, DDL, `CREATE TABLE`, ...), a transaction (`BEGIN` / `COMMIT`),
+`EXPORT DATA`, or any statement the plugin cannot classify. So does a failure to read the job
+or list its statements. Statements inside a `CALL`ed procedure are checked the same way.
+Listing your own jobs needs no extra IAM permission. When the retry is skipped, the original
+error surfaces exactly as before and a warning says why (`... not retrying it on the original
+configuration: <reason>`). A single-statement job that failed wrote nothing, so it is always
+retried.
 
 Jobs submitted by calling `BigQueryHook.insert_job` directly, or by other operators, are not
 covered: the plugin does not see their result. A direct call with `nowait=False` falls back
